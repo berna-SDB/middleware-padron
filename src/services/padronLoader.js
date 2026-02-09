@@ -1,4 +1,5 @@
 const path = require('path');
+const fs = require('fs');
 const { getConnection } = require('../database/connection');
 const { getStatements } = require('../database/queries');
 const { parsePadronFile } = require('./padronParser');
@@ -101,6 +102,14 @@ function loadPadronFile(filePath, padronType, options = {}) {
       job.status = 'completed';
       job.recordsLoaded = totalLoaded;
       job.completedAt = new Date().toISOString();
+
+      // Borrar archivo temporal para no duplicar espacio en disco
+      try {
+        fs.unlinkSync(filePath);
+        logger.info({ filePath }, 'Archivo temporal eliminado');
+      } catch (unlinkErr) {
+        logger.warn({ filePath, err: unlinkErr.message }, 'No se pudo eliminar archivo temporal');
+      }
 
       logger.info({ padronType, totalLoaded, jobId }, 'Carga de padrón completada');
     } catch (err) {
