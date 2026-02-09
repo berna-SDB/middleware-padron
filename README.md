@@ -6,6 +6,39 @@ Middleware para consulta de padrones fiscales argentinos (ARBA, AGIP, IIBB) desd
 
 - **URL**: `http://TU-IP-SERVIDOR:3000`
 - **Autenticacion**: Header `x-api-key`
+- **Panel web**: `http://TU-IP-SERVIDOR:3000/panel`
+
+---
+
+## Panel Web
+
+Interfaz visual para administrar los padrones sin necesidad de Postman ni terminal.
+
+**Acceso**: `http://TU-IP-SERVIDOR:3000/panel`
+
+Al ingresar te pide la API key. Una vez dentro tenes:
+
+- **Dashboard**: Total de registros cargados, memoria, uptime y registros por tipo de padron
+- **Subir Padron**: Selecciona el tipo (ARBA, AGIP, etc.), arrastra el archivo o hace click para seleccionarlo. Muestra barra de progreso durante la carga
+- **Consultar CUIT**: Ingresa un CUIT y una fecha para ver las alicuotas vigentes
+- **Historial de cargas**: Todas las cargas anteriores con fecha, cantidad de registros y estado
+
+### Como subir un padron desde el panel
+
+1. Abri `http://TU-IP-SERVIDOR:3000/panel`
+2. Ingresa tu API key
+3. En **Subir Padron** selecciona el tipo (ej: ARBA)
+4. Arrastra el archivo .txt o hace click para seleccionarlo
+5. Click en **Subir Padron**
+6. Espera a que la barra de progreso llegue al 100%
+7. La pagina se recarga automaticamente mostrando los nuevos datos
+
+### Como consultar un CUIT desde el panel
+
+1. En la seccion **Consultar CUIT** escribi el CUIT (con o sin guiones)
+2. Selecciona la fecha de referencia
+3. Click en **Buscar**
+4. Se muestra el resultado con las alicuotas de percepcion y retencion
 
 ---
 
