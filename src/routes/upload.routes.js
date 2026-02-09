@@ -5,6 +5,7 @@ const fs = require('fs');
 const config = require('../config');
 const { success, errorResponse } = require('../utils/responseBuilder');
 const { loadPadronFile, getJob } = require('../services/padronLoader');
+const { validatePadronFile } = require('../services/padronParser');
 const logger = require('../logger');
 
 const router = Router();
@@ -30,7 +31,7 @@ const upload = multer({
 });
 
 // POST /api/v1/upload/:padronType - Subir archivo de padrón
-router.post('/:padronType', upload.single('padronFile'), (req, res) => {
+router.post('/:padronType', upload.single('padronFile'), async (req, res) => {
   const { padronType } = req.params;
   const upperType = padronType.toUpperCase();
 
@@ -40,6 +41,14 @@ router.post('/:padronType', upload.single('padronFile'), (req, res) => {
 
   if (!req.file) {
     return res.status(400).json(errorResponse('NO_FILE', 'Se requiere un archivo en el campo "padronFile"'));
+  }
+
+  // Validar estructura del archivo antes de cargar
+  const validation = await validatePadronFile(req.file.path);
+  if (!validation.valid) {
+    // Borrar archivo si no es válido
+    try { fs.unlinkSync(req.file.path); } catch (e) {}
+    return res.status(400).json(errorResponse('INVALID_FILE', `El archivo no tiene el formato correcto. Errores encontrados: ${validation.errors.join(' | ')}`));
   }
 
   const replace = req.query.replace === 'true';
