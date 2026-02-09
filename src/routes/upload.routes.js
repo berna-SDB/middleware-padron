@@ -42,13 +42,13 @@ router.post('/:padronType', upload.single('padronFile'), (req, res) => {
     return res.status(400).json(errorResponse('NO_FILE', 'Se requiere un archivo en el campo "padronFile"'));
   }
 
-  const replace = req.query.replace !== 'false';
+  const replace = req.query.replace === 'true';
   const jobId = loadPadronFile(req.file.path, upperType, { replace });
 
-  logger.info({ padronType: upperType, filename: req.file.originalname, jobId }, 'Carga de padrón iniciada');
+  logger.info({ padronType: upperType, filename: req.file.originalname, jobId, replace }, 'Carga de padrón iniciada');
 
   res.status(202).json(success({
-    message: 'Archivo recibido, procesamiento iniciado',
+    message: replace ? 'Archivo recibido, reemplazando datos anteriores' : 'Archivo recibido, acumulando datos históricos',
     padronType: upperType,
     filename: req.file.originalname,
     jobId,
@@ -74,7 +74,7 @@ router.post('/reload/:padronType', (req, res) => {
     return res.status(404).json(errorResponse('FILE_NOT_FOUND', `Archivo no encontrado: ${filePath}`));
   }
 
-  const replace = req.query.replace !== 'false';
+  const replace = req.query.replace === 'true';
   const jobId = loadPadronFile(resolvedPath, upperType, { replace });
 
   logger.info({ padronType: upperType, filePath: resolvedPath, jobId }, 'Recarga de padrón iniciada');
