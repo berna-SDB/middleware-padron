@@ -1,0 +1,7 @@
+node_modules/
+data/padron.db
+data/padron.db-wal
+data/padron.db-shm
+data/padrones/*.txt
+.env
+*.log
