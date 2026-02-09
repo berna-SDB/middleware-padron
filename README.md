@@ -4,7 +4,7 @@ Middleware para consulta de padrones fiscales argentinos (ARBA, AGIP, IIBB) desd
 
 ## Servidor
 
-- **URL**: `http://187.77.8.222:3000`
+- **URL**: `http://TU-IP-SERVIDOR:3000`
 - **Autenticacion**: Header `x-api-key`
 
 ---
@@ -138,7 +138,7 @@ Consulta la alicuota de un vendor/customer en una fecha determinada.
  * @returns {Object|null} Registro del padron o null si no existe
  */
 function consultarPadron(cuit, fecha, tipo) {
-    var url = 'http://187.77.8.222:3000/api/v1/padron/' + cuit;
+    var url = 'http://TU-IP-SERVIDOR:3000/api/v1/padron/' + cuit;
     url += '?fecha=' + fecha;
     if (tipo) {
         url += '&tipo=' + tipo;
@@ -147,7 +147,7 @@ function consultarPadron(cuit, fecha, tipo) {
     var response = https.get({
         url: url,
         headers: {
-            'x-api-key': 'SDB-padron-2026-secure'
+            'x-api-key': 'TU-API-KEY'
         }
     });
 
@@ -183,8 +183,8 @@ Busca automaticamente la alicuota cuando se crea o edita una factura.
  */
 define(['N/https', 'N/record', 'N/log'], function(https, record, log) {
 
-    const API_URL = 'http://187.77.8.222:3000/api/v1/padron/';
-    const API_KEY = 'SDB-padron-2026-secure';
+    const API_URL = 'http://TU-IP-SERVIDOR:3000/api/v1/padron/';
+    const API_KEY = 'TU-API-KEY';
 
     function beforeSubmit(context) {
         if (context.type !== context.UserEventType.CREATE &&
@@ -269,8 +269,8 @@ Para procesar muchos vendors/customers de una vez.
  */
 define(['N/https', 'N/search', 'N/record', 'N/log'], function(https, search, record, log) {
 
-    const API_URL = 'http://187.77.8.222:3000/api/v1/padron/batch';
-    const API_KEY = 'SDB-padron-2026-secure';
+    const API_URL = 'http://TU-IP-SERVIDOR:3000/api/v1/padron/batch';
+    const API_KEY = 'TU-API-KEY';
 
     function getInputData() {
         // Buscar vendors que necesitan actualizacion de alicuotas
@@ -378,8 +378,8 @@ Para que los usuarios puedan consultar manualmente desde NetSuite.
  */
 define(['N/https', 'N/ui/serverWidget', 'N/log'], function(https, serverWidget, log) {
 
-    const API_URL = 'http://187.77.8.222:3000/api/v1/padron/';
-    const API_KEY = 'SDB-padron-2026-secure';
+    const API_URL = 'http://TU-IP-SERVIDOR:3000/api/v1/padron/';
+    const API_KEY = 'TU-API-KEY';
 
     function onRequest(context) {
         if (context.request.method === 'GET') {
@@ -481,8 +481,8 @@ Crea un modulo utilitario para reutilizar en cualquier script.
  */
 define(['N/https', 'N/log'], function(https, log) {
 
-    const API_BASE = 'http://187.77.8.222:3000/api/v1';
-    const API_KEY = 'SDB-padron-2026-secure';
+    const API_BASE = 'http://TU-IP-SERVIDOR:3000/api/v1';
+    const API_KEY = 'TU-API-KEY';
 
     function _request(method, path, body) {
         var options = {
@@ -616,8 +616,8 @@ define(['N/log', './SDB-Padron-Utils'], function(log, padron) {
 
 Desde **Postman**:
 
-1. `POST http://187.77.8.222:3000/api/v1/upload/ARBA`
-2. Header: `x-api-key: SDB-padron-2026-secure`
+1. `POST http://TU-IP-SERVIDOR:3000/api/v1/upload/ARBA`
+2. Header: `x-api-key: TU-API-KEY`
 3. Body: form-data, campo `padronFile` (tipo File), seleccionar el .txt
 
 Los datos se acumulan. Si subis el mismo archivo dos veces no se duplican.
@@ -700,7 +700,7 @@ pm2 startup
 ## Actualizar servidor
 
 ```bash
-ssh root@187.77.8.222
+ssh root@TU-IP-SERVIDOR
 cd /opt/middleware-padron
 git pull
 pm2 restart middleware-padron
