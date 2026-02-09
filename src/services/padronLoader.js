@@ -48,8 +48,28 @@ function loadPadronFile(filePath, padronType, options = {}) {
         logger.info({ padronType, deleted: deleted.changes }, 'Registros anteriores eliminados');
       }
 
-      const insertBatch = db.transaction((records) => {
-        for (const r of records) {
+      // Leer todos los registros para detectar períodos
+      const records = [];
+      const periods = new Set();
+
+      for await (const record of parsePadronFile(filePath, padronType)) {
+        records.push(record);
+        periods.add(`${record.fechaDesde}|${record.fechaHasta}`);
+      }
+
+      // Eliminar períodos duplicados antes de insertar
+      if (!replace) {
+        for (const period of periods) {
+          const [desde, hasta] = period.split('|');
+          const deleted = stmts.deleteByTypeAndPeriod.run(padronType, desde, hasta);
+          if (deleted.changes > 0) {
+            logger.info({ padronType, desde, hasta, deleted: deleted.changes }, 'Período duplicado eliminado antes de insertar');
+          }
+        }
+      }
+
+      const insertBatch = db.transaction((batch) => {
+        for (const r of batch) {
           stmts.insertEntry.run(
             r.padronType, r.fechaPublicacion, r.fechaDesde, r.fechaHasta,
             r.cuit, r.tipoContribuyente, r.marcaAlta, r.marcaBaja,
@@ -59,27 +79,17 @@ function loadPadronFile(filePath, padronType, options = {}) {
         }
       });
 
-      let batch = [];
       let totalLoaded = 0;
 
-      for await (const record of parsePadronFile(filePath, padronType)) {
-        batch.push(record);
-        if (batch.length >= BATCH_SIZE) {
-          insertBatch(batch);
-          totalLoaded += batch.length;
-          job.recordsLoaded = totalLoaded;
-          batch = [];
-
-          if (totalLoaded % 100000 === 0) {
-            logger.info({ padronType, totalLoaded }, 'Progreso de carga');
-          }
-        }
-      }
-
-      // Insertar batch restante
-      if (batch.length > 0) {
+      for (let i = 0; i < records.length; i += BATCH_SIZE) {
+        const batch = records.slice(i, i + BATCH_SIZE);
         insertBatch(batch);
         totalLoaded += batch.length;
+        job.recordsLoaded = totalLoaded;
+
+        if (totalLoaded % 100000 === 0) {
+          logger.info({ padronType, totalLoaded }, 'Progreso de carga');
+        }
       }
 
       // Checkpoint WAL para liberar espacio

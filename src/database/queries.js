@@ -75,6 +75,11 @@ function getStatements() {
       DELETE FROM padron_entries WHERE padron_type = ?
     `),
 
+    deleteByTypeAndPeriod: db.prepare(`
+      DELETE FROM padron_entries
+      WHERE padron_type = ? AND fecha_desde = ? AND fecha_hasta = ?
+    `),
+
     insertMetadata: db.prepare(`
       INSERT INTO padron_metadata (padron_type, filename, records_loaded, status)
       VALUES (?, ?, ?, ?)
