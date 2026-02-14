@@ -57,17 +57,24 @@ router.post('/batch', (req, res) => {
     return res.status(400).json(errorResponse('TOO_MANY_CUITS', `Máximo ${config.MAX_BATCH_CUITS} CUITs por consulta`));
   }
 
-  // Validar y normalizar todos los CUITs
+  // Validar y normalizar CUITs, separando válidos de inválidos
   const normalizedCuits = [];
+  const invalidCuits = {};
   for (const cuit of cuits) {
     const validation = validateCuit(cuit);
     if (!validation.valid) {
-      return res.status(400).json(errorResponse('INVALID_CUIT', `CUIT inválido: ${cuit}`));
+      invalidCuits[cuit] = { found: false, error: validation.error, records: [] };
+    } else {
+      normalizedCuits.push(validation.cuit);
     }
-    normalizedCuits.push(validation.cuit);
   }
 
   const result = queryBatch(normalizedCuits, { tipo, fecha });
+
+  // Agregar los CUITs inválidos al resultado
+  Object.assign(result.results, invalidCuits);
+  result.totalInvalid = Object.keys(invalidCuits).length;
+
   res.json(success(result));
 });
 
