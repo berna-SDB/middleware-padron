@@ -26,6 +26,13 @@ function isValidCuit(value) {
 }
 
 /**
+ * Detecta si una línea es un header (contiene texto no numérico en los campos de fecha).
+ */
+function isHeaderLine(fields) {
+  return /[a-zA-Z]/.test(fields[0]);
+}
+
+/**
  * Valida la estructura de una línea del padrón.
  * Retorna null si es válida, o un string con el error.
  */
@@ -72,6 +79,11 @@ async function validatePadronFile(filePath, maxLines = 100) {
 
     const fields = line.split(';');
 
+    // Saltar línea de header
+    if (lineNum === 1 && isHeaderLine(fields)) {
+      continue;
+    }
+
     // Guardar primera línea como muestra
     if (!sampleFields) {
       sampleFields = fields.length;
@@ -117,6 +129,12 @@ async function* parsePadronFile(filePath, padronType) {
     if (!line.trim()) continue;
 
     const fields = line.split(';');
+
+    // Saltar línea de header
+    if (lineNum === 1 && isHeaderLine(fields)) {
+      logger.info('Header detectado, saltando primera línea');
+      continue;
+    }
 
     const error = validateLine(fields, lineNum);
     if (error) {
