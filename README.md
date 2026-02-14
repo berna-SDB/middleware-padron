@@ -82,7 +82,7 @@ Content-Type: application/json
 }
 ```
 
-Maximo 100 CUITs por consulta.
+Maximo 500 CUITs por consulta.
 
 ### Subir archivo de padron
 
@@ -335,9 +335,9 @@ define(['N/https', 'N/search', 'N/record', 'N/log'], function(https, search, rec
     function reduce(context) {
         var vendors = context.values.map(function(v) { return JSON.parse(v); });
 
-        // Procesar en lotes de 100
-        for (var i = 0; i < vendors.length; i += 100) {
-            var batch = vendors.slice(i, i + 100);
+        // Procesar en lotes de 500
+        for (var i = 0; i < vendors.length; i += 500) {
+            var batch = vendors.slice(i, i + 500);
             var cuits = batch.map(function(v) { return v.cuit; });
 
             var today = new Date().toISOString().split('T')[0];

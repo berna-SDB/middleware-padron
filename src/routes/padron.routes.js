@@ -46,10 +46,11 @@ router.get('/:cuit/rango', (req, res) => {
 
 // POST /api/v1/padron/batch - Consulta batch de múltiples CUITs
 router.post('/batch', (req, res) => {
-  const { cuits, tipo, fecha } = req.body;
+  const body = req.body || {};
+  const { cuits, tipo, fecha } = body;
 
   if (!cuits || !Array.isArray(cuits) || cuits.length === 0) {
-    return res.status(400).json(errorResponse('INVALID_REQUEST', 'Se requiere un array "cuits" no vacío'));
+    return res.status(400).json(errorResponse('INVALID_REQUEST', 'Se requiere un body JSON con un array "cuits" no vacío. Verificá que el Content-Type sea application/json'));
   }
 
   if (cuits.length > config.MAX_BATCH_CUITS) {
