@@ -8,6 +8,7 @@ function initializeSchema() {
     CREATE TABLE IF NOT EXISTS padron_entries (
       id                  INTEGER PRIMARY KEY AUTOINCREMENT,
       padron_type         TEXT    NOT NULL,
+      regimen             TEXT,
       fecha_publicacion   TEXT    NOT NULL,
       fecha_desde         TEXT    NOT NULL,
       fecha_hasta         TEXT    NOT NULL,
@@ -41,7 +42,32 @@ function initializeSchema() {
     );
   `);
 
+  runMigrations(db);
+
   logger.info('Database schema initialized');
+}
+
+/**
+ * Migraciones incrementales sobre tablas ya existentes.
+ * Cada una debe ser idempotente: el arranque las corre siempre.
+ */
+function runMigrations(db) {
+  const columns = db.prepare(`PRAGMA table_info(padron_entries)`).all().map(c => c.name);
+
+  // Régimen del padrón de origen: 'P' percepción, 'R' retención, 'AMBOS'.
+  // Permite que percepción y retención de una misma jurisdicción convivan bajo
+  // un mismo padron_type sin pisarse al deduplicar por período.
+  if (!columns.includes('regimen')) {
+    db.exec(`ALTER TABLE padron_entries ADD COLUMN regimen TEXT`);
+    // Lo ya cargado proviene del layout completo, que trae ambas alícuotas.
+    const updated = db.prepare(`UPDATE padron_entries SET regimen = 'AMBOS' WHERE regimen IS NULL`).run();
+    logger.info({ filas: updated.changes }, 'Migración: columna "regimen" agregada a padron_entries');
+  }
+
+  db.exec(`
+    CREATE INDEX IF NOT EXISTS idx_type_regimen_periodo
+      ON padron_entries (padron_type, regimen, fecha_desde, fecha_hasta);
+  `);
 }
 
 module.exports = { initializeSchema };

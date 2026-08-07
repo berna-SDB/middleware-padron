@@ -55,16 +55,18 @@ function loadPadronFile(filePath, padronType, options = {}) {
 
       for await (const record of parsePadronFile(filePath, padronType)) {
         records.push(record);
-        periods.add(`${record.fechaDesde}|${record.fechaHasta}`);
+        periods.add(`${record.regimen}|${record.fechaDesde}|${record.fechaHasta}`);
       }
 
-      // Eliminar períodos duplicados antes de insertar
+      // Eliminar períodos duplicados antes de insertar. La clave incluye el
+      // régimen: un padrón de percepción no debe borrar el de retención del
+      // mismo tipo y período.
       if (!replace) {
         for (const period of periods) {
-          const [desde, hasta] = period.split('|');
-          const deleted = stmts.deleteByTypeAndPeriod.run(padronType, desde, hasta);
+          const [regimen, desde, hasta] = period.split('|');
+          const deleted = stmts.deleteByTypeAndPeriod.run(padronType, desde, hasta, regimen);
           if (deleted.changes > 0) {
-            logger.info({ padronType, desde, hasta, deleted: deleted.changes }, 'Período duplicado eliminado antes de insertar');
+            logger.info({ padronType, regimen, desde, hasta, deleted: deleted.changes }, 'Período duplicado eliminado antes de insertar');
           }
         }
       }
@@ -72,7 +74,7 @@ function loadPadronFile(filePath, padronType, options = {}) {
       const insertBatch = db.transaction((batch) => {
         for (const r of batch) {
           stmts.insertEntry.run(
-            r.padronType, r.fechaPublicacion, r.fechaDesde, r.fechaHasta,
+            r.padronType, r.regimen, r.fechaPublicacion, r.fechaDesde, r.fechaHasta,
             r.cuit, r.tipoContribuyente, r.marcaAlta, r.marcaBaja,
             r.alicuotaPercepcion, r.alicuotaRetencion,
             r.grupoPercepcion, r.grupoRetencion

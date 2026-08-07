@@ -4,6 +4,77 @@ const { parsePadronDate } = require('../utils/dateUtils');
 const logger = require('../logger');
 
 /**
+ * Layouts de archivo soportados.
+ *
+ * Los padrones con prefijo de régimen (P/R) comparten la misma cabecera
+ * (regimen;fechaPublicacion;fechaDesde;fechaHasta;cuit;tipo;alta;baja) y solo
+ * difieren en la cola de alícuotas.
+ *
+ * `regimen` indica qué alícuotas trae el archivo: 'P' percepción, 'R' retención,
+ * 'AMBOS' las dos. Se guarda en cada registro para que padrones de percepción y
+ * retención de la misma jurisdicción puedan convivir bajo un mismo padronType.
+ */
+const FORMATS = {
+  // ARBA / padrón unificado, sin prefijo. El campo 12 (denominación) es opcional.
+  // fechaPub;desde;hasta;cuit;tipo;alta;baja;alicPerc;alicRet;grupoPerc;grupoRet[;denominacion]
+  ARBA: {
+    name: 'ARBA',
+    regimen: 'AMBOS',
+    minFields: 11,
+    fields: {
+      fechaPublicacion: 0,
+      fechaDesde: 1,
+      fechaHasta: 2,
+      cuit: 3,
+      tipoContribuyente: 4,
+      marcaAlta: 5,
+      marcaBaja: 6,
+      alicuotaPercepcion: 7,
+      alicuotaRetencion: 8,
+      grupoPercepcion: 9,
+      grupoRetencion: 10,
+    },
+  },
+
+  // Régimen de percepción. Sin códigos de grupo.
+  // P;fechaPub;desde;hasta;cuit;tipo;alta;baja;alicPerc
+  PERCEPCION: {
+    name: 'PERCEPCION',
+    regimen: 'P',
+    minFields: 9,
+    fields: {
+      fechaPublicacion: 1,
+      fechaDesde: 2,
+      fechaHasta: 3,
+      cuit: 4,
+      tipoContribuyente: 5,
+      marcaAlta: 6,
+      marcaBaja: 7,
+      alicuotaPercepcion: 8,
+    },
+  },
+
+  // Régimen de retención.
+  // R;fechaPub;desde;hasta;cuit;tipo;alta;baja;alicRet;grupoRet
+  RETENCION: {
+    name: 'RETENCION',
+    regimen: 'R',
+    minFields: 10,
+    fields: {
+      fechaPublicacion: 1,
+      fechaDesde: 2,
+      fechaHasta: 3,
+      cuit: 4,
+      tipoContribuyente: 5,
+      marcaAlta: 6,
+      marcaBaja: 7,
+      alicuotaRetencion: 8,
+      grupoRetencion: 9,
+    },
+  },
+};
+
+/**
  * Convierte alícuota de formato argentino (coma decimal) a float.
  */
 function parseAlicuota(value) {
@@ -26,43 +97,80 @@ function isValidCuit(value) {
 }
 
 /**
- * Detecta si una línea es un header (contiene texto no numérico en los campos de fecha).
+ * Determina el layout de una línea a partir de su primer campo.
+ * Retorna null si no coincide con ninguno (típicamente, una línea de header).
  */
-function isHeaderLine(fields) {
-  return /[a-zA-Z]/.test(fields[0]);
+function detectFormat(fields) {
+  const first = (fields[0] || '').trim().toUpperCase();
+  if (first === 'P') return FORMATS.PERCEPCION;
+  if (first === 'R') return FORMATS.RETENCION;
+  if (/^\d{8}$/.test(first)) return FORMATS.ARBA;
+  return null;
 }
 
 /**
- * Valida la estructura de una línea del padrón.
+ * Valida la estructura de una línea según el layout detectado.
  * Retorna null si es válida, o un string con el error.
  */
-function validateLine(fields, lineNum) {
-  if (fields.length < 11) {
-    return `Línea ${lineNum}: solo tiene ${fields.length} campos, se requieren 11`;
+function validateLine(fields, lineNum, format) {
+  const { fields: idx, minFields, name } = format;
+
+  if (fields.length < minFields) {
+    return `Línea ${lineNum}: tiene ${fields.length} campos, el formato ${name} requiere ${minFields}`;
   }
 
-  if (!isValidDate(fields[0])) {
-    return `Línea ${lineNum}: fechaPublicacion inválida "${fields[0]}" (debe ser DDMMYYYY)`;
+  const fechas = ['fechaPublicacion', 'fechaDesde', 'fechaHasta'];
+  for (const campo of fechas) {
+    const value = fields[idx[campo]];
+    if (!isValidDate(value)) {
+      return `Línea ${lineNum}: ${campo} inválida "${value}" (debe ser DDMMYYYY)`;
+    }
   }
 
-  if (!isValidDate(fields[1])) {
-    return `Línea ${lineNum}: fechaDesde inválida "${fields[1]}" (debe ser DDMMYYYY)`;
-  }
-
-  if (!isValidDate(fields[2])) {
-    return `Línea ${lineNum}: fechaHasta inválida "${fields[2]}" (debe ser DDMMYYYY)`;
-  }
-
-  if (!isValidCuit(fields[3])) {
-    return `Línea ${lineNum}: CUIT inválido "${fields[3]}" (debe ser 11 dígitos)`;
+  const cuit = fields[idx.cuit];
+  if (!isValidCuit(cuit)) {
+    return `Línea ${lineNum}: CUIT inválido "${cuit}" (debe ser 11 dígitos)`;
   }
 
   return null;
 }
 
 /**
+ * Construye el registro a insertar a partir de una línea ya validada.
+ */
+function buildRecord(fields, format, padronType) {
+  const idx = format.fields;
+  const at = (campo) => (idx[campo] === undefined ? null : fields[idx[campo]]);
+
+  const fechaDesde = parsePadronDate(fields[idx.fechaDesde].trim());
+  const fechaPublicacion = parsePadronDate(fields[idx.fechaPublicacion].trim());
+
+  const grupo = (campo) => {
+    const raw = at(campo);
+    if (raw === null) return null;
+    return parseInt(raw, 10) || null;
+  };
+
+  return {
+    padronType,
+    regimen: format.regimen,
+    fechaPublicacion: fechaPublicacion || fechaDesde,
+    fechaDesde,
+    fechaHasta: parsePadronDate(fields[idx.fechaHasta].trim()),
+    cuit: fields[idx.cuit].trim(),
+    tipoContribuyente: (at('tipoContribuyente') || '').trim(),
+    marcaAlta: (at('marcaAlta') || '').trim(),
+    marcaBaja: (at('marcaBaja') || '').trim(),
+    alicuotaPercepcion: parseAlicuota(at('alicuotaPercepcion')),
+    alicuotaRetencion: parseAlicuota(at('alicuotaRetencion')),
+    grupoPercepcion: grupo('grupoPercepcion'),
+    grupoRetencion: grupo('grupoRetencion'),
+  };
+}
+
+/**
  * Valida las primeras N líneas de un archivo sin cargarlo.
- * Retorna un reporte de validación.
+ * Retorna un reporte de validación incluyendo el formato detectado.
  */
 async function validatePadronFile(filePath, maxLines = 100) {
   const stream = fs.createReadStream(filePath, { encoding: 'latin1' });
@@ -71,6 +179,7 @@ async function validatePadronFile(filePath, maxLines = 100) {
   const errors = [];
   let lineNum = 0;
   let valid = 0;
+  let format = null;
   let sampleFields = null;
 
   for await (const line of rl) {
@@ -79,17 +188,19 @@ async function validatePadronFile(filePath, maxLines = 100) {
 
     const fields = line.split(';');
 
-    // Saltar línea de header
-    if (lineNum === 1 && isHeaderLine(fields)) {
-      continue;
-    }
-
-    // Guardar primera línea como muestra
-    if (!sampleFields) {
+    // La primera línea útil define el formato del archivo. Si no matchea ningún
+    // layout conocido asumimos que es un header y seguimos con la siguiente.
+    if (!format) {
+      format = detectFormat(fields);
+      if (!format) {
+        if (lineNum === 1) continue;
+        errors.push(`Línea ${lineNum}: no coincide con ningún formato conocido (esperado DDMMYYYY, "P" o "R" en el primer campo, se encontró "${fields[0]}")`);
+        break;
+      }
       sampleFields = fields.length;
     }
 
-    const error = validateLine(fields, lineNum);
+    const error = validateLine(fields, lineNum, format);
     if (error) {
       errors.push(error);
       if (errors.length >= 10) break;
@@ -103,7 +214,9 @@ async function validatePadronFile(filePath, maxLines = 100) {
   stream.destroy();
 
   return {
-    valid: errors.length === 0,
+    valid: errors.length === 0 && valid > 0,
+    formato: format ? format.name : null,
+    regimen: format ? format.regimen : null,
     linesChecked: lineNum,
     validLines: valid,
     errors,
@@ -122,6 +235,7 @@ async function* parsePadronFile(filePath, padronType) {
   let lineNum = 0;
   let parsed = 0;
   let skipped = 0;
+  let format = null;
   const skipReasons = {};
 
   for await (const line of rl) {
@@ -130,13 +244,16 @@ async function* parsePadronFile(filePath, padronType) {
 
     const fields = line.split(';');
 
-    // Saltar línea de header
-    if (lineNum === 1 && isHeaderLine(fields)) {
-      logger.info('Header detectado, saltando primera línea');
-      continue;
+    if (!format) {
+      format = detectFormat(fields);
+      if (!format) {
+        logger.info({ lineNum }, 'Línea sin formato reconocible al inicio, se asume header');
+        continue;
+      }
+      logger.info({ filePath, formato: format.name, regimen: format.regimen }, 'Formato de padrón detectado');
     }
 
-    const error = validateLine(fields, lineNum);
+    const error = validateLine(fields, lineNum, format);
     if (error) {
       skipped++;
       const reason = error.split(':')[1]?.trim().split('"')[0]?.trim() || 'desconocido';
@@ -147,28 +264,11 @@ async function* parsePadronFile(filePath, padronType) {
       continue;
     }
 
-    const fechaPublicacion = parsePadronDate(fields[0].trim());
-    const fechaDesde = parsePadronDate(fields[1].trim());
-    const fechaHasta = parsePadronDate(fields[2].trim());
-
     parsed++;
-    yield {
-      padronType,
-      fechaPublicacion: fechaPublicacion || fechaDesde,
-      fechaDesde,
-      fechaHasta,
-      cuit: fields[3].trim(),
-      tipoContribuyente: fields[4].trim(),
-      marcaAlta: fields[5].trim(),
-      marcaBaja: fields[6].trim(),
-      alicuotaPercepcion: parseAlicuota(fields[7]),
-      alicuotaRetencion: parseAlicuota(fields[8]),
-      grupoPercepcion: parseInt(fields[9], 10) || null,
-      grupoRetencion: parseInt(fields[10], 10) || null,
-    };
+    yield buildRecord(fields, format, padronType);
   }
 
-  logger.info({ filePath, lineNum, parsed, skipped, skipReasons }, 'Archivo parseado completamente');
+  logger.info({ filePath, formato: format?.name, lineNum, parsed, skipped, skipReasons }, 'Archivo parseado completamente');
 }
 
-module.exports = { parsePadronFile, validatePadronFile };
+module.exports = { parsePadronFile, validatePadronFile, detectFormat, FORMATS };

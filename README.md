@@ -122,6 +122,7 @@ Todas las respuestas tienen este formato:
     "records": [
       {
         "padronType": "ARBA",
+        "regimen": "AMBOS",
         "fechaPublicacion": "2025-08-27",
         "fechaDesde": "2025-09-01",
         "fechaHasta": "2025-09-30",
@@ -139,6 +140,10 @@ Todas las respuestas tienen este formato:
   "error": null
 }
 ```
+
+El campo `regimen` indica que alicuotas trae ese registro segun el archivo de origen:
+`P` solo percepcion, `R` solo retencion, `AMBOS` las dos. Las alicuotas que el archivo
+no informa vienen en `0` y sus grupos en `null`.
 
 Cuando no se encuentra el CUIT:
 
@@ -669,16 +674,25 @@ Para **reemplazar** todos los datos de un tipo: agregar `?replace=true` a la URL
 
 ## Formato del archivo de padron
 
-Archivo de texto plano separado por punto y coma (`;`):
+Archivos de texto plano separados por punto y coma (`;`). El formato se **detecta solo**
+a partir del primer campo de la primera linea util, no hace falta declararlo al subir.
+
+| Primer campo | Formato | Regimen |
+|--------------|---------|---------|
+| 8 digitos (DDMMYYYY) | Completo (ARBA / padron unificado) | `AMBOS` |
+| `P` | Regimen de percepcion | `P` |
+| `R` | Regimen de retencion | `R` |
+
+Si la primera linea no coincide con ninguno de los tres, se asume que es un header y se saltea.
+
+### Formato completo (ARBA)
 
 ```
-fechaPublicacion;fechaDesde;fechaHasta;cuit;tipoContribuyente;marcaAlta;marcaBaja;alicuotaPercepcion;alicuotaRetencion;grupoPercepcion;grupoRetencion;
-```
-
-Ejemplo:
-```
+fechaPublicacion;fechaDesde;fechaHasta;cuit;tipoContribuyente;marcaAlta;marcaBaja;alicuotaPercepcion;alicuotaRetencion;grupoPercepcion;grupoRetencion;[denominacion]
 27082025;01092025;30092025;20000000028;D;N;N;6,00;5,00;25;24;
 ```
+
+Minimo 11 campos. El campo 12 (denominacion / razon social) es opcional y se ignora.
 
 | Campo | Descripcion | Ejemplo |
 |-------|-------------|---------|
@@ -693,6 +707,38 @@ Ejemplo:
 | alicuotaRetencion | Alicuota de retencion (coma decimal) | 5,00 |
 | grupoPercepcion | Codigo grupo de percepcion | 25 |
 | grupoRetencion | Codigo grupo de retencion | 24 |
+
+### Regimen de percepcion (prefijo `P`)
+
+```
+P;fechaPublicacion;fechaDesde;fechaHasta;cuit;tipoContribuyente;marcaAlta;marcaBaja;alicuotaPercepcion
+P;22062026;01072026;31072026;20001220986;L;X;N;04,00
+```
+
+9 campos. No trae codigos de grupo ni alicuota de retencion: se guardan en `null` y `0`.
+
+### Regimen de retencion (prefijo `R`)
+
+```
+R;fechaPublicacion;fechaDesde;fechaHasta;cuit;tipoContribuyente;marcaAlta;marcaBaja;alicuotaRetencion;grupoRetencion
+R;25062026;01072026;31072026;20000282465;D;N;N;3,00;21;
+```
+
+10 campos minimo. No trae alicuota ni grupo de percepcion.
+
+### Convivencia de percepcion y retencion
+
+Un mismo `padronType` puede tener cargados el padron de percepcion y el de retencion
+de la misma jurisdiccion y el mismo periodo. Cada registro guarda su `regimen`, y la
+deduplicacion al reprocesar un archivo **borra solo el regimen que se esta cargando**:
+subir el padron de retencion no pisa el de percepcion.
+
+Consultar un CUIT en ese caso devuelve **dos registros** para el mismo periodo, uno por
+regimen. Hay que mirar el campo `regimen` para saber cual usar.
+
+> `?replace=true` es la excepcion: borra **todos** los datos de ese `padronType` sin
+> importar el regimen. Si tenes percepcion y retencion bajo un mismo tipo, un replace
+> se lleva ambos.
 
 ---
 

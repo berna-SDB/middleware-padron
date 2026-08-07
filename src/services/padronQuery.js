@@ -4,6 +4,7 @@ const { todayISO } = require('../utils/dateUtils');
 function formatRecord(row) {
   return {
     padronType: row.padron_type,
+    regimen: row.regimen,
     fechaPublicacion: row.fecha_publicacion,
     fechaDesde: row.fecha_desde,
     fechaHasta: row.fecha_hasta,

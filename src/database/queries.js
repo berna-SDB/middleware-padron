@@ -64,20 +64,25 @@ function getStatements() {
 
     insertEntry: db.prepare(`
       INSERT INTO padron_entries
-        (padron_type, fecha_publicacion, fecha_desde, fecha_hasta, cuit,
+        (padron_type, regimen, fecha_publicacion, fecha_desde, fecha_hasta, cuit,
          tipo_contribuyente, marca_alta, marca_baja,
          alicuota_percepcion, alicuota_retencion,
          grupo_percepcion, grupo_retencion)
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     `),
 
     deleteByType: db.prepare(`
       DELETE FROM padron_entries WHERE padron_type = ?
     `),
 
+    // Acota el borrado al régimen del archivo entrante para que percepción y
+    // retención del mismo tipo y período no se pisen entre sí.
     deleteByTypeAndPeriod: db.prepare(`
       DELETE FROM padron_entries
-      WHERE padron_type = ? AND fecha_desde = ? AND fecha_hasta = ?
+      WHERE padron_type = ?
+        AND fecha_desde = ?
+        AND fecha_hasta = ?
+        AND IFNULL(regimen, 'AMBOS') = ?
     `),
 
     insertMetadata: db.prepare(`
