@@ -6,6 +6,7 @@ const { parsePadronFile } = require('./padronParser');
 const logger = require('../logger');
 
 const BATCH_SIZE = 10000;
+const PROGRESS_EVERY = 100000;
 
 // Job tracking en memoria
 const jobs = new Map();
@@ -49,28 +50,6 @@ function loadPadronFile(filePath, padronType, options = {}) {
         logger.info({ padronType, deleted: deleted.changes }, 'Registros anteriores eliminados');
       }
 
-      // Leer todos los registros para detectar períodos
-      const records = [];
-      const periods = new Set();
-
-      for await (const record of parsePadronFile(filePath, padronType)) {
-        records.push(record);
-        periods.add(`${record.regimen}|${record.fechaDesde}|${record.fechaHasta}`);
-      }
-
-      // Eliminar períodos duplicados antes de insertar. La clave incluye el
-      // régimen: un padrón de percepción no debe borrar el de retención del
-      // mismo tipo y período.
-      if (!replace) {
-        for (const period of periods) {
-          const [regimen, desde, hasta] = period.split('|');
-          const deleted = stmts.deleteByTypeAndPeriod.run(padronType, desde, hasta, regimen);
-          if (deleted.changes > 0) {
-            logger.info({ padronType, regimen, desde, hasta, deleted: deleted.changes }, 'Período duplicado eliminado antes de insertar');
-          }
-        }
-      }
-
       const insertBatch = db.transaction((batch) => {
         for (const r of batch) {
           stmts.insertEntry.run(
@@ -82,18 +61,58 @@ function loadPadronFile(filePath, padronType, options = {}) {
         }
       });
 
-      let totalLoaded = 0;
+      // Períodos ya limpiados en esta corrida. Cada uno se borra la primera vez
+      // que aparece un registro suyo, siempre antes de que se inserte ninguna de
+      // sus filas, y una sola vez: de lo contrario el segundo lote del mismo
+      // período borraría lo que insertó el primero.
+      //
+      // La clave incluye el régimen para que un padrón de percepción no elimine
+      // el de retención del mismo tipo y período.
+      const purgedPeriods = new Set();
 
-      for (let i = 0; i < records.length; i += BATCH_SIZE) {
-        const batch = records.slice(i, i + BATCH_SIZE);
+      function purgePeriodOnce(record) {
+        if (replace) return; // ya se borró el tipo entero más arriba
+        const key = `${record.regimen}|${record.fechaDesde}|${record.fechaHasta}`;
+        if (purgedPeriods.has(key)) return;
+        purgedPeriods.add(key);
+
+        const deleted = stmts.deleteByTypeAndPeriod.run(
+          padronType, record.fechaDesde, record.fechaHasta, record.regimen
+        );
+        if (deleted.changes > 0) {
+          logger.info(
+            { padronType, regimen: record.regimen, desde: record.fechaDesde, hasta: record.fechaHasta, deleted: deleted.changes },
+            'Período duplicado eliminado antes de insertar'
+          );
+        }
+      }
+
+      // Se inserta a medida que se parsea: en memoria solo vive un lote, no el
+      // archivo entero. Un padrón de varios millones de registros ya no depende
+      // de que entre completo en el heap.
+      let batch = [];
+      let totalLoaded = 0;
+      let nextProgressLog = PROGRESS_EVERY;
+
+      function flush() {
+        if (batch.length === 0) return;
         insertBatch(batch);
         totalLoaded += batch.length;
         job.recordsLoaded = totalLoaded;
+        batch = [];
 
-        if (totalLoaded % 100000 === 0) {
+        if (totalLoaded >= nextProgressLog) {
           logger.info({ padronType, totalLoaded }, 'Progreso de carga');
+          nextProgressLog += PROGRESS_EVERY;
         }
       }
+
+      for await (const record of parsePadronFile(filePath, padronType)) {
+        purgePeriodOnce(record);
+        batch.push(record);
+        if (batch.length >= BATCH_SIZE) flush();
+      }
+      flush();
 
       // Checkpoint WAL para liberar espacio
       db.pragma('wal_checkpoint(TRUNCATE)');
