@@ -1,28 +1,35 @@
 const { Router } = require('express');
 const { success } = require('../utils/responseBuilder');
 const { getStatements } = require('../database/queries');
-const { getConnection } = require('../database/connection');
+const { getStats } = require('../services/padronStats');
 
 const router = Router();
 
+// Los totales salen de la caché de estadísticas (ver padronStats.js), nunca de
+// un COUNT sobre la tabla: con millones de filas eso bloqueaba el servidor.
+function statsInfo(stats) {
+  return {
+    status: stats ? 'ok' : 'pendiente',
+    computedAt: stats ? stats.computedAt : null,
+  };
+}
+
 // GET /api/v1/health
 router.get('/', (req, res) => {
-  const stmts = getStatements();
-  const totalRecords = stmts.totalCount.get().total;
-  const countByType = stmts.countByType.all();
-  const metadata = stmts.getMetadata.all();
-
+  const stats = getStats();
+  const metadata = getStatements().getMetadata.all();
   const memUsage = process.memoryUsage();
 
   res.json(success({
     status: 'healthy',
     uptime: Math.floor(process.uptime()),
     database: 'connected',
-    totalRecords,
-    padronesLoaded: countByType.map(r => ({
-      tipo: r.padron_type,
-      registros: r.total,
+    totalRecords: stats ? stats.total : null,
+    padronesLoaded: (stats ? stats.byType : []).map(t => ({
+      tipo: t.padronType,
+      registros: t.total,
     })),
+    stats: statsInfo(stats),
     ultimasCargas: metadata.slice(0, 5).map(m => ({
       tipo: m.padron_type,
       archivo: m.filename,
@@ -39,16 +46,19 @@ router.get('/', (req, res) => {
 
 // GET /api/v1/padron-info
 router.get('/padron-info', (req, res) => {
-  const stmts = getStatements();
-  const metadata = stmts.getMetadata.all();
-  const countByType = stmts.countByType.all();
+  const stats = getStats();
+  const metadata = getStatements().getMetadata.all();
 
   res.json(success({
-    padrones: countByType.map(r => {
-      const meta = metadata.find(m => m.padron_type === r.padron_type);
+    stats: statsInfo(stats),
+    padrones: (stats ? stats.byType : []).map(t => {
+      const meta = metadata.find(m => m.padron_type === t.padronType);
       return {
-        padronType: r.padron_type,
-        totalRegistros: r.total,
+        padronType: t.padronType,
+        totalRegistros: t.total,
+        periodos: stats.byPeriod
+          .filter(p => p.padronType === t.padronType)
+          .map(p => ({ regimen: p.regimen, desde: p.fechaDesde, hasta: p.fechaHasta, registros: p.total })),
         ultimaCarga: meta ? {
           archivo: meta.filename,
           registros: meta.records_loaded,

@@ -18,7 +18,9 @@ Interfaz visual para administrar los padrones sin necesidad de Postman ni termin
 
 Al ingresar te pide la API key. Una vez dentro tenes:
 
-- **Dashboard**: Total de registros cargados, memoria, uptime y registros por tipo de padron
+- **Dashboard**: Total de registros cargados, memoria, uptime, registros por tipo de padron y
+  periodos cargados (tipo, regimen, desde, hasta). Los totales se calculan en segundo plano al
+  arrancar y al terminar cada carga; hasta entonces el panel muestra "calculando…"
 - **Subir Padron**: Selecciona el tipo (ARBA, AGIP, etc.), arrastra el archivo o hace click para seleccionarlo. Muestra barra de progreso durante la carga
 - **Consultar CUIT**: Ingresa un CUIT y una fecha para ver las alicuotas vigentes
 - **Historial de cargas**: Todas las cargas anteriores con fecha, cantidad de registros y estado
@@ -99,6 +101,11 @@ Campo: padronFile
   admitidos para ese tipo (ver [Que layout admite cada tipo](#que-layout-admite-cada-tipo-de-padron)).
   Subir el padron unificado de ARBA como `AGIP` responde `400 LAYOUT_MISMATCH` y no toca la base.
   `reload` aplica las mismas validaciones.
+- La carga corre en un **worker thread** con su propia conexion a SQLite, asi que las consultas
+  por CUIT siguen respondiendo mientras se borra e inserta. Las cargas se ejecutan **de a una**:
+  si llega otra mientras hay una en curso, queda en cola (`status: "queued"`).
+- Los borrados (del tipo entero con `replace=true`, o del periodo repetido en modo acumular) se
+  hacen en lotes de 50.000 filas para que el WAL no crezca al tamaño del periodo.
 
 ### Estado de carga
 
@@ -106,11 +113,36 @@ Campo: padronFile
 GET /api/v1/upload/status/:jobId
 ```
 
+```json
+{
+  "jobId": "load-arba-1789147939750",
+  "padronType": "ARBA",
+  "filename": "PADRON_UNIFICADO_ARBA.txt",
+  "status": "loading",
+  "recordsDeleted": 832379,
+  "recordsLoaded": 700000,
+  "queuedAt": "2026-09-11T17:32:19.750Z",
+  "startedAt": "2026-09-11T17:32:19.751Z",
+  "completedAt": null,
+  "error": null
+}
+```
+
+`status` pasa por `queued` (esperando que termine otra carga), `loading`, y termina en
+`completed` o `error`. `recordsDeleted` cuenta las filas anteriores borradas antes de insertar.
+Los jobs viven en memoria: tras un reinicio del servidor responden `404 JOB_NOT_FOUND`.
+
 ### Health check
 
 ```
 GET /api/v1/health
 ```
+
+`totalRecords` y `padronesLoaded` salen de una cache de estadisticas que se recalcula en un
+worker al arrancar y al terminar cada carga (contar la tabla en cada pedido bloqueaba el servidor
+con millones de filas). `stats.status` es `pendiente` hasta el primer calculo, con
+`totalRecords: null`, y despues `ok` con `stats.computedAt`. `GET /api/v1/padron-info` usa la
+misma cache y agrega, por tipo, la lista de `periodos` cargados (regimen, desde, hasta, registros).
 
 ---
 
@@ -818,4 +850,30 @@ ssh root@TU-IP-SERVIDOR
 cd /opt/middleware-padron
 git pull
 pm2 restart middleware-padron
+```
+
+Al arrancar se corren las migraciones del esquema antes de abrir el puerto. La primera vez que
+levanta esta version sobre una base grande elimina dos indices redundantes (`idx_cuit` e
+`idx_padron_type`), lo que puede demorar unos minutos con disco lento: durante ese lapso el
+servidor no acepta conexiones. Despues el puerto abre y las estadisticas se calculan en segundo
+plano (`stats.status: "pendiente"` en health, "calculando…" en el panel).
+
+## Mantenimiento de la base
+
+Como las cargas acumulan periodos, la base crece con cada mes cargado y las recargas se vuelven
+mas lentas cuando deja de entrar en la RAM del servidor. Conviene revisar de vez en cuando los
+periodos cargados (`GET /api/v1/padron-info` o la tarjeta **Periodos cargados** del panel) y
+borrar los que ya no se consultan. Con el servidor detenido (`pm2 stop middleware-padron`):
+
+```bash
+cd /opt/middleware-padron
+NODE_PATH=./node_modules node -e "
+const db = require('better-sqlite3')('data/padron.db');
+// Ejemplo: borrar un periodo puntual de un tipo y regimen
+const r = db.prepare(\"DELETE FROM padron_entries WHERE padron_type = ? AND regimen = ? AND fecha_desde = ? AND fecha_hasta = ?\")
+  .run('AGIP', 'AMBOS', '2025-09-01', '2025-09-30');
+console.log('borradas', r.changes);
+db.exec('VACUUM');  // compacta el archivo; necesita espacio libre igual al tamaño de la base
+"
+pm2 start middleware-padron
 ```

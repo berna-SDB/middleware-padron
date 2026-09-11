@@ -1,22 +1,30 @@
 const { Router } = require('express');
 const { getStatements } = require('../database/queries');
-const { getJob, getAllJobs } = require('../services/padronLoader');
+const { getAllJobs } = require('../services/padronLoader');
+const { getStats } = require('../services/padronStats');
 const config = require('../config');
 
 const router = Router();
 
 router.get('/', (req, res) => {
-  const stmts = getStatements();
-  const totalRecords = stmts.totalCount.get().total;
-  const countByType = stmts.countByType.all();
-  const metadata = stmts.getMetadata.all().slice(0, 10);
+  // Los totales salen de la caché que mantiene el worker de carga: contar la
+  // tabla en cada pedido bloqueaba el servidor con millones de filas.
+  const stats = getStats();
+  const countByType = stats ? stats.byType : [];
+  const periods = stats ? stats.byPeriod : [];
+  const metadata = getStatements().getMetadata.all().slice(0, 10);
   const jobs = getAllJobs().reverse().slice(0, 5);
   const memUsage = process.memoryUsage();
+  const pendiente = '<span title="Se calcula en segundo plano al arrancar y al terminar cada carga">calculando…</span>';
 
   const padronTypes = config.ALLOWED_PADRON_TYPES.map(t => `<option value="${t}">${t}</option>`).join('');
 
   const countRows = countByType.map(r => `
-    <tr><td>${r.padron_type}</td><td>${r.total.toLocaleString()}</td></tr>
+    <tr><td>${r.padronType}</td><td>${r.total.toLocaleString()}</td></tr>
+  `).join('');
+
+  const periodRows = periods.map(p => `
+    <tr><td>${p.padronType}</td><td>${p.regimen}</td><td>${p.fechaDesde}</td><td>${p.fechaHasta}</td><td>${p.total.toLocaleString()}</td></tr>
   `).join('');
 
   const metaRows = metadata.map(m => `
@@ -73,6 +81,7 @@ router.get('/', (req, res) => {
     .search-box input { flex: 1; padding: 10px 16px; border: 1px solid #ddd; border-radius: 6px; font-size: 14px; }
     .result { margin-top: 16px; padding: 16px; background: #f8f9fa; border-radius: 6px; font-family: monospace; font-size: 13px; white-space: pre-wrap; display: none; }
     input[type="file"] { display: none; }
+    .hint { font-size: 12px; color: #95a5a6; margin-top: 12px; }
   </style>
 </head>
 <body>
@@ -84,11 +93,11 @@ router.get('/', (req, res) => {
       <h2>Estado</h2>
       <div class="stats">
         <div class="stat">
-          <div class="number">${totalRecords.toLocaleString()}</div>
-          <div class="label">Registros totales</div>
+          <div class="number">${stats ? stats.total.toLocaleString() : pendiente}</div>
+          <div class="label">Registros totales${stats ? '' : ' (pendiente)'}</div>
         </div>
         <div class="stat">
-          <div class="number">${countByType.length}</div>
+          <div class="number">${stats ? countByType.length : pendiente}</div>
           <div class="label">Tipos de padron</div>
         </div>
         <div class="stat">
@@ -105,7 +114,17 @@ router.get('/', (req, res) => {
         <tr><th>Tipo</th><th>Registros</th></tr>
         ${countRows}
       </table>` : ''}
+      ${stats ? `<p class="hint">Totales calculados ${stats.computedAt}</p>` : ''}
     </div>
+
+    ${periods.length > 0 ? `
+    <div class="card">
+      <h2>Periodos cargados</h2>
+      <table>
+        <tr><th>Tipo</th><th>Regimen</th><th>Desde</th><th>Hasta</th><th>Registros</th></tr>
+        ${periodRows}
+      </table>
+    </div>` : ''}
 
     <div class="card">
       <h2>Subir Padron</h2>
@@ -217,6 +236,12 @@ router.get('/', (req, res) => {
         fetch('/api/v1/upload/status/' + jobId, { headers: { 'x-api-key': API_KEY } })
           .then(function(r) { return r.json(); })
           .then(function(body) {
+            if (!body.success) {
+              clearInterval(interval);
+              document.getElementById('progressText').textContent = 'Error: ' + body.error.message;
+              document.getElementById('uploadBtn').disabled = false;
+              return;
+            }
             if (body.data.status === 'completed') {
               clearInterval(interval);
               document.getElementById('progressFill').style.width = '100%';
@@ -227,12 +252,22 @@ router.get('/', (req, res) => {
               clearInterval(interval);
               document.getElementById('progressText').textContent = 'Error: ' + body.data.error;
               document.getElementById('uploadBtn').disabled = false;
+            } else if (body.data.status === 'queued') {
+              document.getElementById('progressText').textContent = 'En cola: esperando que termine otra carga...';
+            } else if (body.data.recordsLoaded === 0 && body.data.recordsDeleted > 0) {
+              document.getElementById('progressText').textContent =
+                'Borrando registros anteriores... ' + body.data.recordsDeleted.toLocaleString();
             } else {
               var pct = 50 + Math.min(45, (body.data.recordsLoaded / 4000000) * 45);
               document.getElementById('progressFill').style.width = pct + '%';
               document.getElementById('progressText').textContent =
                 'Procesando... ' + body.data.recordsLoaded.toLocaleString() + ' registros';
             }
+          })
+          .catch(function() {
+            clearInterval(interval);
+            document.getElementById('progressText').textContent = 'Se perdio la conexion con el servidor. Recarga la pagina.';
+            document.getElementById('uploadBtn').disabled = false;
           });
       }, 2000);
     }

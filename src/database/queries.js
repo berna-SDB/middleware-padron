@@ -71,18 +71,33 @@ function getStatements() {
       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     `),
 
-    deleteByType: db.prepare(`
-      DELETE FROM padron_entries WHERE padron_type = ?
+    // Los borrados masivos van por lotes (LIMIT) para que cada uno sea una
+    // transacción corta: el WAL no crece al tamaño de todo el período y los
+    // checkpoints automáticos corren entre lote y lote. El llamador repite
+    // hasta que un lote borra menos filas que el límite.
+    deleteByTypeChunk: db.prepare(`
+      DELETE FROM padron_entries
+      WHERE rowid IN (
+        SELECT rowid FROM padron_entries
+        WHERE padron_type = ?
+        LIMIT ?
+      )
     `),
 
-    // Acota el borrado al régimen del archivo entrante para que percepción y
-    // retención del mismo tipo y período no se pisen entre sí.
-    deleteByTypeAndPeriod: db.prepare(`
+    // Acotado al régimen del archivo entrante para que percepción y retención
+    // del mismo tipo y período no se pisen. Usa el índice completo
+    // (padron_type, regimen, fecha_desde, fecha_hasta); la migración garantiza
+    // que ninguna fila tenga regimen NULL.
+    deleteByTypeAndPeriodChunk: db.prepare(`
       DELETE FROM padron_entries
-      WHERE padron_type = ?
-        AND fecha_desde = ?
-        AND fecha_hasta = ?
-        AND IFNULL(regimen, 'AMBOS') = ?
+      WHERE rowid IN (
+        SELECT rowid FROM padron_entries
+        WHERE padron_type = ?
+          AND regimen = ?
+          AND fecha_desde = ?
+          AND fecha_hasta = ?
+        LIMIT ?
+      )
     `),
 
     insertMetadata: db.prepare(`
@@ -94,12 +109,13 @@ function getStatements() {
       SELECT * FROM padron_metadata ORDER BY loaded_at DESC
     `),
 
-    countByType: db.prepare(`
-      SELECT padron_type, COUNT(*) as total FROM padron_entries GROUP BY padron_type
-    `),
-
-    totalCount: db.prepare(`
-      SELECT COUNT(*) as total FROM padron_entries
+    // Recorre el índice (padron_type, regimen, fecha_desde, fecha_hasta) entero:
+    // solo debe ejecutarse en el worker, nunca en el hilo que atiende requests.
+    statsByPeriod: db.prepare(`
+      SELECT padron_type, regimen, fecha_desde, fecha_hasta, COUNT(*) AS total
+      FROM padron_entries
+      GROUP BY padron_type, regimen, fecha_desde, fecha_hasta
+      ORDER BY padron_type, regimen, fecha_desde
     `),
   };
 

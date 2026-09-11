@@ -3,6 +3,7 @@ const logger = require('./src/logger');
 const { initializeSchema } = require('./src/database/schema');
 const { closeConnection } = require('./src/database/connection');
 const { getLayoutPolicy } = require('./src/services/layoutPolicy');
+const { refreshStats } = require('./src/services/padronStats');
 const createApp = require('./src/app');
 
 // Validar la política de layouts antes de levantar: una PADRON_LAYOUTS mal
@@ -30,6 +31,10 @@ const server = app.listen(config.PORT, () => {
   logger.info(`  GET  /api/v1/upload/status/:jobId    - Estado de carga`);
   logger.info(`  GET  /api/v1/health                  - Health check`);
   logger.info(`  GET  /api/v1/padron-info             - Info de padrones cargados`);
+
+  // Los totales por tipo y período se calculan en un worker aparte para no
+  // demorar el arranque ni bloquear consultas; hasta entonces figuran pendientes.
+  refreshStats().catch((err) => logger.error({ err: err.message }, 'No se pudieron calcular las estadísticas iniciales'));
 });
 
 // Graceful shutdown

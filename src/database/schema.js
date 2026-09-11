@@ -23,14 +23,10 @@ function initializeSchema() {
       created_at          TEXT    DEFAULT (datetime('now'))
     );
 
-    CREATE INDEX IF NOT EXISTS idx_cuit
-      ON padron_entries (cuit);
-
+    -- Consultas por CUIT (con o sin tipo y fechas): el prefijo (cuit) cubre
+    -- también las búsquedas que solo filtran por CUIT.
     CREATE INDEX IF NOT EXISTS idx_cuit_type_dates
       ON padron_entries (cuit, padron_type, fecha_desde, fecha_hasta);
-
-    CREATE INDEX IF NOT EXISTS idx_padron_type
-      ON padron_entries (padron_type);
 
     CREATE TABLE IF NOT EXISTS padron_metadata (
       id              INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -64,10 +60,25 @@ function runMigrations(db) {
     logger.info({ filas: updated.changes }, 'Migración: columna "regimen" agregada a padron_entries');
   }
 
+  // Borrados y estadísticas por tipo, régimen y período. Su prefijo
+  // (padron_type) cubre también los borrados de un tipo entero.
   db.exec(`
     CREATE INDEX IF NOT EXISTS idx_type_regimen_periodo
       ON padron_entries (padron_type, regimen, fecha_desde, fecha_hasta);
   `);
+
+  // Índices de versiones anteriores que son prefijo de otro índice y por lo
+  // tanto redundantes: idx_cuit ⊂ idx_cuit_type_dates, idx_padron_type ⊂
+  // idx_type_regimen_periodo. Cada uno costaba una escritura extra por fila
+  // insertada o borrada y cerca de un cuarto del tamaño de la base.
+  const indexes = db.prepare(`PRAGMA index_list(padron_entries)`).all().map(i => i.name);
+  for (const redundant of ['idx_cuit', 'idx_padron_type']) {
+    if (indexes.includes(redundant)) {
+      const started = Date.now();
+      db.exec(`DROP INDEX ${redundant}`);
+      logger.info({ index: redundant, ms: Date.now() - started }, 'Migración: índice redundante eliminado');
+    }
+  }
 }
 
 module.exports = { initializeSchema };
