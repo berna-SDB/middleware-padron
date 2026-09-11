@@ -2,7 +2,17 @@ const config = require('./src/config');
 const logger = require('./src/logger');
 const { initializeSchema } = require('./src/database/schema');
 const { closeConnection } = require('./src/database/connection');
+const { getLayoutPolicy } = require('./src/services/layoutPolicy');
 const createApp = require('./src/app');
+
+// Validar la política de layouts antes de levantar: una PADRON_LAYOUTS mal
+// escrita debe impedir el arranque, no fallar en el primer upload.
+try {
+  logger.info({ layouts: getLayoutPolicy() }, 'Política de layouts por tipo de padrón');
+} catch (err) {
+  logger.fatal({ err: err.message }, 'Configuración inválida');
+  process.exit(1);
+}
 
 // Inicializar base de datos
 initializeSchema();

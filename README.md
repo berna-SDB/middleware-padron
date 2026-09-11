@@ -95,6 +95,10 @@ Campo: padronFile
 - Por defecto **acumula** datos historicos
 - Si subis el mismo archivo dos veces, no se duplican los datos
 - Usar `?replace=true` para borrar todos los datos anteriores de ese tipo
+- Antes de cargar se valida la estructura del archivo y que su layout sea uno de los
+  admitidos para ese tipo (ver [Que layout admite cada tipo](#que-layout-admite-cada-tipo-de-padron)).
+  Subir el padron unificado de ARBA como `AGIP` responde `400 LAYOUT_MISMATCH` y no toca la base.
+  `reload` aplica las mismas validaciones.
 
 ### Estado de carga
 
@@ -677,15 +681,15 @@ Para **reemplazar** todos los datos de un tipo: agregar `?replace=true` a la URL
 Archivos de texto plano separados por punto y coma (`;`). El formato se **detecta solo**
 a partir del primer campo de la primera linea util, no hace falta declararlo al subir.
 
-| Primer campo | Formato | Regimen |
-|--------------|---------|---------|
-| 8 digitos (DDMMYYYY) | Completo (ARBA / padron unificado) | `AMBOS` |
-| `P` | Regimen de percepcion | `P` |
-| `R` | Regimen de retencion | `R` |
+| Primer campo | Layout | Regimen |
+|--------------|--------|---------|
+| 8 digitos (DDMMYYYY) | `UNIFICADO` (11 campos, el que publica ARBA) | `AMBOS` |
+| `P` | `PERCEPCION` | `P` |
+| `R` | `RETENCION` | `R` |
 
 Si la primera linea no coincide con ninguno de los tres, se asume que es un header y se saltea.
 
-### Formato completo (ARBA)
+### Layout `UNIFICADO` (11 campos, sin prefijo)
 
 ```
 fechaPublicacion;fechaDesde;fechaHasta;cuit;tipoContribuyente;marcaAlta;marcaBaja;alicuotaPercepcion;alicuotaRetencion;grupoPercepcion;grupoRetencion;[denominacion]
@@ -708,7 +712,7 @@ Minimo 11 campos. El campo 12 (denominacion / razon social) es opcional y se ign
 | grupoPercepcion | Codigo grupo de percepcion | 25 |
 | grupoRetencion | Codigo grupo de retencion | 24 |
 
-### Regimen de percepcion (prefijo `P`)
+### Layout `PERCEPCION` (prefijo `P`)
 
 ```
 P;fechaPublicacion;fechaDesde;fechaHasta;cuit;tipoContribuyente;marcaAlta;marcaBaja;alicuotaPercepcion
@@ -717,7 +721,7 @@ P;22062026;01072026;31072026;20001220986;L;X;N;04,00
 
 9 campos. No trae codigos de grupo ni alicuota de retencion: se guardan en `null` y `0`.
 
-### Regimen de retencion (prefijo `R`)
+### Layout `RETENCION` (prefijo `R`)
 
 ```
 R;fechaPublicacion;fechaDesde;fechaHasta;cuit;tipoContribuyente;marcaAlta;marcaBaja;alicuotaRetencion;grupoRetencion
@@ -740,6 +744,31 @@ regimen. Hay que mirar el campo `regimen` para saber cual usar.
 > importar el regimen. Si tenes percepcion y retencion bajo un mismo tipo, un replace
 > se lleva ambos.
 
+### Que layout admite cada tipo de padron
+
+El archivo no trae ningun campo que identifique la jurisdiccion, y los mismos CUITs
+aparecen en ARBA y en AGIP, asi que no hay forma de detectarla por contenido. Lo unico
+que distingue a los archivos es el layout. Por eso cada `padronType` declara que layouts
+admite, y un upload o reload cuyo layout no coincide se rechaza con `400 LAYOUT_MISMATCH`
+**antes** de borrar o insertar nada, incluso con `?replace=true`.
+
+Se configura en `.env`:
+
+```
+# TIPO:LAYOUT[,LAYOUT]|TIPO:LAYOUT
+PADRON_LAYOUTS=ARBA:UNIFICADO|AGIP:PERCEPCION,RETENCION
+```
+
+Ese es el valor por defecto si la variable no existe. Reglas:
+
+- Un tipo **sin entrada** (por ejemplo `IIBB_SANTA_FE`) acepta cualquier layout y deja un
+  warning en el log. Cuando aparezca el primer archivo real de esa jurisdiccion, agregar
+  su layout al parser si es un formato nuevo y sumar la entrada a `PADRON_LAYOUTS`.
+- Los layouts posibles son los que conoce el parser: `UNIFICADO`, `PERCEPCION`, `RETENCION`.
+- Si la variable menciona un tipo que no esta en `ALLOWED_PADRON_TYPES` o un layout
+  inexistente, el servidor **no levanta** y el log dice cual es el problema.
+- `PADRON_LAYOUTS=` (vacio explicito) desactiva la politica por completo.
+
 ---
 
 ## Setup local (desarrollo)
@@ -751,6 +780,12 @@ npm install
 cp .env.example .env
 # Editar .env con tu configuracion
 npm run dev
+```
+
+Tests (usan una base SQLite temporal, no tocan `data/`):
+
+```bash
+npm test
 ```
 
 ## Setup servidor (produccion)

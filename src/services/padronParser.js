@@ -15,10 +15,10 @@ const logger = require('../logger');
  * retención de la misma jurisdicción puedan convivir bajo un mismo padronType.
  */
 const FORMATS = {
-  // ARBA / padrón unificado, sin prefijo. El campo 12 (denominación) es opcional.
+  // Padrón unificado (el que publica ARBA), sin prefijo. El campo 12 (denominación) es opcional.
   // fechaPub;desde;hasta;cuit;tipo;alta;baja;alicPerc;alicRet;grupoPerc;grupoRet[;denominacion]
-  ARBA: {
-    name: 'ARBA',
+  UNIFICADO: {
+    name: 'UNIFICADO',
     regimen: 'AMBOS',
     minFields: 11,
     fields: {
@@ -104,7 +104,7 @@ function detectFormat(fields) {
   const first = (fields[0] || '').trim().toUpperCase();
   if (first === 'P') return FORMATS.PERCEPCION;
   if (first === 'R') return FORMATS.RETENCION;
-  if (/^\d{8}$/.test(first)) return FORMATS.ARBA;
+  if (/^\d{8}$/.test(first)) return FORMATS.UNIFICADO;
   return null;
 }
 
