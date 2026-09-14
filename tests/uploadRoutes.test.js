@@ -11,6 +11,7 @@ const createApp = require('../src/app');
 
 const FIXTURE_UNIFICADO = path.join(__dirname, 'fixtures', 'sample-padron.txt');
 const FIXTURE_PERCEPCION = path.join(__dirname, 'fixtures', 'sample-percepcion.txt');
+const FIXTURE_AGIP = path.join(__dirname, 'fixtures', 'sample-agip.txt');
 const UPLOAD_DIR = process.env.UPLOAD_DIR;
 
 let server;
@@ -69,14 +70,14 @@ function uploadedFiles() {
   return fs.existsSync(UPLOAD_DIR) ? fs.readdirSync(UPLOAD_DIR) : [];
 }
 
-test('subir el padrón UNIFICADO como AGIP se rechaza con LAYOUT_MISMATCH y no deja archivo en disco', async () => {
+test('subir el padrón de percepción (prefijo P) como AGIP se rechaza con LAYOUT_MISMATCH y no deja archivo en disco', async () => {
   const before = uploadedFiles();
-  const { status, body } = await upload('AGIP', FIXTURE_UNIFICADO);
+  const { status, body } = await upload('AGIP', FIXTURE_PERCEPCION);
 
   assert.equal(status, 400);
   assert.equal(body.error.code, 'LAYOUT_MISMATCH');
-  assert.match(body.error.message, /UNIFICADO/);
   assert.match(body.error.message, /PERCEPCION/);
+  assert.match(body.error.message, /UNIFICADO/);
   assert.deepEqual(uploadedFiles(), before, 'el archivo rechazado debe borrarse del UPLOAD_DIR');
 });
 
@@ -93,8 +94,8 @@ test('subir el padrón UNIFICADO como ARBA se acepta y carga', async () => {
   assert.ok(job.recordsLoaded > 0);
 });
 
-test('subir el padrón de percepción como AGIP se acepta y carga', async () => {
-  const { status, body } = await upload('AGIP', FIXTURE_PERCEPCION);
+test('subir el padrón de AGIP (layout UNIFICADO con denominación) como AGIP se acepta y carga', async () => {
+  const { status, body } = await upload('AGIP', FIXTURE_AGIP);
   assert.equal(status, 202);
   const job = await waitForJob(body.data.jobId);
   assert.equal(job.recordsLoaded, 3);
@@ -110,7 +111,7 @@ test('reload con layout equivocado y replace=true se rechaza antes de borrar los
   const antes = countRows('AGIP');
   assert.ok(antes > 0, 'precondición: AGIP ya tiene datos cargados');
 
-  const { status, body } = await reload('AGIP', FIXTURE_UNIFICADO, '?replace=true');
+  const { status, body } = await reload('AGIP', FIXTURE_PERCEPCION, '?replace=true');
 
   assert.equal(status, 400);
   assert.equal(body.error.code, 'LAYOUT_MISMATCH');

@@ -99,7 +99,8 @@ Campo: padronFile
 - Usar `?replace=true` para borrar todos los datos anteriores de ese tipo
 - Antes de cargar se valida la estructura del archivo y que su layout sea uno de los
   admitidos para ese tipo (ver [Que layout admite cada tipo](#que-layout-admite-cada-tipo-de-padron)).
-  Subir el padron unificado de ARBA como `AGIP` responde `400 LAYOUT_MISMATCH` y no toca la base.
+  Subir un padron con prefijo `P`/`R` (por ejemplo el de Cordoba) como `ARBA` o `AGIP` responde
+  `400 LAYOUT_MISMATCH` y no toca la base.
   `reload` aplica las mismas validaciones.
 - La carga corre en un **worker thread** con su propia conexion a SQLite, asi que las consultas
   por CUIT siguen respondiendo mientras se borra e inserta. Las cargas se ejecutan **de a una**:
@@ -715,7 +716,7 @@ a partir del primer campo de la primera linea util, no hace falta declararlo al 
 
 | Primer campo | Layout | Regimen |
 |--------------|--------|---------|
-| 8 digitos (DDMMYYYY) | `UNIFICADO` (11 campos, el que publica ARBA) | `AMBOS` |
+| 8 digitos (DDMMYYYY) | `UNIFICADO` (11/12 campos, el que publican ARBA y AGIP) | `AMBOS` |
 | `P` | `PERCEPCION` | `P` |
 | `R` | `RETENCION` | `R` |
 
@@ -729,6 +730,8 @@ fechaPublicacion;fechaDesde;fechaHasta;cuit;tipoContribuyente;marcaAlta;marcaBaj
 ```
 
 Minimo 11 campos. El campo 12 (denominacion / razon social) es opcional y se ignora.
+ARBA lo publica con el campo 12 vacio y con codigos de grupo; AGIP (archivo "RET y PER")
+lo publica con la denominacion cargada y ambos grupos en `00`.
 
 | Campo | Descripcion | Ejemplo |
 |-------|-------------|---------|
@@ -780,15 +783,20 @@ regimen. Hay que mirar el campo `regimen` para saber cual usar.
 
 El archivo no trae ningun campo que identifique la jurisdiccion, y los mismos CUITs
 aparecen en ARBA y en AGIP, asi que no hay forma de detectarla por contenido. Lo unico
-que distingue a los archivos es el layout. Por eso cada `padronType` declara que layouts
+que se puede chequear es el layout. Por eso cada `padronType` declara que layouts
 admite, y un upload o reload cuyo layout no coincide se rechaza con `400 LAYOUT_MISMATCH`
 **antes** de borrar o insertar nada, incluso con `?replace=true`.
+
+ARBA y AGIP publican el mismo layout `UNIFICADO`, asi que la politica **no** distingue
+un archivo de ARBA de uno de AGIP: el padron de ARBA subido como `AGIP` se carga igual.
+Lo que si frena es subir un padron con prefijo `P`/`R` (por ejemplo el de Cordoba) bajo
+`ARBA` o `AGIP`, o el unificado bajo un tipo que declare otro layout.
 
 Se configura en `.env`:
 
 ```
 # TIPO:LAYOUT[,LAYOUT]|TIPO:LAYOUT
-PADRON_LAYOUTS=ARBA:UNIFICADO|AGIP:PERCEPCION,RETENCION
+PADRON_LAYOUTS=ARBA:UNIFICADO|AGIP:UNIFICADO
 ```
 
 Ese es el valor por defecto si la variable no existe. Reglas:

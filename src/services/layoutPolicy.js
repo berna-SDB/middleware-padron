@@ -5,13 +5,15 @@ const { FORMATS } = require('./padronParser');
  * Política de layouts: qué layouts de archivo admite cada padronType.
  *
  * Se configura con PADRON_LAYOUTS, con formato `TIPO:LAYOUT[,LAYOUT]|TIPO:LAYOUT`,
- * por ejemplo `ARBA:UNIFICADO|AGIP:PERCEPCION,RETENCION`. Un tipo sin entrada
- * acepta cualquier layout: sirve para jurisdicciones de las que todavía no se
- * conoce el archivo.
+ * por ejemplo `ARBA:UNIFICADO|IIBB_CORDOBA:PERCEPCION,RETENCION`. Un tipo sin
+ * entrada acepta cualquier layout: sirve para jurisdicciones de las que todavía
+ * no se conoce el archivo.
  *
- * El layout de un archivo no dice nada sobre su jurisdicción (no trae ningún
- * campo que la identifique), así que esta política es la única barrera contra
- * subir, por ejemplo, el padrón unificado de ARBA como si fuera de AGIP.
+ * El archivo no trae ningún campo que identifique la jurisdicción, así que esta
+ * política es la única barrera contra subir un padrón bajo el tipo equivocado.
+ * Alcanza hasta donde los layouts difieren: ARBA y AGIP publican el mismo layout
+ * UNIFICADO (AGIP con la denominación en el campo 12 y ambos grupos en 00), así
+ * que entre esos dos la política no distingue.
  */
 
 /**
