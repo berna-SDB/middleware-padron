@@ -11,9 +11,10 @@ const { FORMATS } = require('./padronParser');
  *
  * El archivo no trae ningún campo que identifique la jurisdicción, así que esta
  * política es la única barrera contra subir un padrón bajo el tipo equivocado.
- * Alcanza hasta donde los layouts difieren: ARBA y AGIP publican el mismo layout
- * UNIFICADO (AGIP con la denominación en el campo 12 y ambos grupos en 00), así
- * que entre esos dos la política no distingue.
+ * Alcanza hasta donde los layouts difieren: ARBA se carga con sus padrones de
+ * regímenes generales (prefijo P/R) y AGIP con el unificado de 12 campos, así
+ * que el default frena el archivo de AGIP subido como ARBA y viceversa. Un P/R
+ * de ARBA y uno de Córdoba, en cambio, no se distinguen.
  */
 
 /**

@@ -9,7 +9,7 @@ const { initializeSchema } = require('../src/database/schema');
 const { getConnection, closeConnection } = require('../src/database/connection');
 const createApp = require('../src/app');
 
-const FIXTURE_UNIFICADO = path.join(__dirname, 'fixtures', 'sample-padron.txt');
+const FIXTURE_AGIP = path.join(__dirname, 'fixtures', 'sample-agip.txt');
 const HEADERS = { 'x-api-key': 'test-key' };
 
 let server;
@@ -55,7 +55,7 @@ test('health sin estadísticas calculadas responde igual, con los totales pendie
 });
 
 test('tras una carga, health y padron-info devuelven los totales desde la caché de estadísticas', async () => {
-  await uploadAndWait('ARBA', FIXTURE_UNIFICADO);
+  await uploadAndWait('AGIP', FIXTURE_AGIP);
   const esperado = getConnection().prepare(`SELECT COUNT(*) AS n FROM padron_entries`).get().n;
   assert.ok(esperado > 0);
 
@@ -63,9 +63,9 @@ test('tras una carga, health y padron-info devuelven los totales desde la caché
   assert.equal(health.body.data.totalRecords, esperado);
   assert.equal(health.body.data.stats.status, 'ok');
   assert.ok(typeof health.body.data.stats.computedAt === 'string');
-  assert.deepEqual(health.body.data.padronesLoaded, [{ tipo: 'ARBA', registros: esperado }]);
+  assert.deepEqual(health.body.data.padronesLoaded, [{ tipo: 'AGIP', registros: esperado }]);
 
   const info = await getJson('/padron-info');
-  assert.equal(info.body.data.padrones[0].padronType, 'ARBA');
+  assert.equal(info.body.data.padrones[0].padronType, 'AGIP');
   assert.equal(info.body.data.padrones[0].totalRegistros, esperado);
 });

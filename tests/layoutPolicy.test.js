@@ -10,9 +10,10 @@ const {
   getLayoutPolicy,
 } = require('../src/services/layoutPolicy');
 
-// ARBA y AGIP publican el mismo layout de 11/12 campos sin prefijo. Los layouts
-// con prefijo P/R son de otras jurisdicciones (por ejemplo Córdoba).
-const DEFAULT_POLICY = { ARBA: ['UNIFICADO'], AGIP: ['UNIFICADO'] };
+// ARBA se carga con sus padrones de regímenes generales, con prefijo P/R. AGIP
+// publica el unificado de 12 campos sin prefijo. Con eso el default frena el
+// archivo de AGIP subido como ARBA y el de ARBA subido como AGIP.
+const DEFAULT_POLICY = { ARBA: ['PERCEPCION', 'RETENCION'], AGIP: ['UNIFICADO'] };
 
 test('parseLayoutPolicy convierte "tipo:layout,layout|tipo:layout" en un mapa por tipo', () => {
   assert.deepEqual(
@@ -59,25 +60,28 @@ test('validateLayoutPolicy acepta una política consistente', () => {
   }));
 });
 
-test('checkLayoutPolicy permite el layout UNIFICADO para ARBA', () => {
-  assert.deepEqual(checkLayoutPolicy('ARBA', 'UNIFICADO', DEFAULT_POLICY), { allowed: true, expected: ['UNIFICADO'] });
+test('checkLayoutPolicy permite PERCEPCION y RETENCION para ARBA (sus padrones de regímenes generales)', () => {
+  assert.deepEqual(checkLayoutPolicy('ARBA', 'PERCEPCION', DEFAULT_POLICY), { allowed: true, expected: ['PERCEPCION', 'RETENCION'] });
+  assert.deepEqual(checkLayoutPolicy('ARBA', 'RETENCION', DEFAULT_POLICY), { allowed: true, expected: ['PERCEPCION', 'RETENCION'] });
 });
 
 test('checkLayoutPolicy permite el layout UNIFICADO para AGIP (es el que publica AGIP)', () => {
   assert.deepEqual(checkLayoutPolicy('AGIP', 'UNIFICADO', DEFAULT_POLICY), { allowed: true, expected: ['UNIFICADO'] });
 });
 
-test('checkLayoutPolicy rechaza PERCEPCION y RETENCION para ARBA y AGIP', () => {
-  for (const tipo of ['ARBA', 'AGIP']) {
-    assert.deepEqual(checkLayoutPolicy(tipo, 'PERCEPCION', DEFAULT_POLICY), { allowed: false, expected: ['UNIFICADO'] });
-    assert.deepEqual(checkLayoutPolicy(tipo, 'RETENCION', DEFAULT_POLICY), { allowed: false, expected: ['UNIFICADO'] });
-  }
+test('checkLayoutPolicy rechaza el UNIFICADO para ARBA: es el archivo de AGIP subido con el tipo equivocado', () => {
+  assert.deepEqual(checkLayoutPolicy('ARBA', 'UNIFICADO', DEFAULT_POLICY), { allowed: false, expected: ['PERCEPCION', 'RETENCION'] });
+});
+
+test('checkLayoutPolicy rechaza PERCEPCION y RETENCION para AGIP', () => {
+  assert.deepEqual(checkLayoutPolicy('AGIP', 'PERCEPCION', DEFAULT_POLICY), { allowed: false, expected: ['UNIFICADO'] });
+  assert.deepEqual(checkLayoutPolicy('AGIP', 'RETENCION', DEFAULT_POLICY), { allowed: false, expected: ['UNIFICADO'] });
 });
 
 test('checkLayoutPolicy permite cualquier layout para un tipo sin política', () => {
   assert.deepEqual(checkLayoutPolicy('IIBB_SANTA_FE', 'UNIFICADO', DEFAULT_POLICY), { allowed: true, expected: null });
 });
 
-test('la política por defecto asigna UNIFICADO tanto a ARBA como a AGIP', () => {
+test('la política por defecto admite P/R para ARBA y UNIFICADO para AGIP', () => {
   assert.deepEqual(getLayoutPolicy(), DEFAULT_POLICY);
 });

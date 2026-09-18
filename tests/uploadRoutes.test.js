@@ -81,17 +81,18 @@ test('subir el padrón de percepción (prefijo P) como AGIP se rechaza con LAYOU
   assert.deepEqual(uploadedFiles(), before, 'el archivo rechazado debe borrarse del UPLOAD_DIR');
 });
 
-test('subir el padrón de percepción (prefijo P) como ARBA se rechaza con LAYOUT_MISMATCH', async () => {
+test('subir el padrón de percepción (prefijo P) como ARBA se acepta y carga: ARBA se carga con sus P/R', async () => {
   const { status, body } = await upload('ARBA', FIXTURE_PERCEPCION);
-  assert.equal(status, 400);
-  assert.equal(body.error.code, 'LAYOUT_MISMATCH');
-});
-
-test('subir el padrón UNIFICADO como ARBA se acepta y carga', async () => {
-  const { status, body } = await upload('ARBA', FIXTURE_UNIFICADO);
   assert.equal(status, 202);
   const job = await waitForJob(body.data.jobId);
-  assert.ok(job.recordsLoaded > 0);
+  assert.equal(job.recordsLoaded, 3);
+});
+
+test('subir el padrón UNIFICADO como ARBA se rechaza con LAYOUT_MISMATCH: es el layout de AGIP', async () => {
+  const { status, body } = await upload('ARBA', FIXTURE_UNIFICADO);
+  assert.equal(status, 400);
+  assert.equal(body.error.code, 'LAYOUT_MISMATCH');
+  assert.match(body.error.message, /PERCEPCION, RETENCION/);
 });
 
 test('subir el padrón de AGIP (layout UNIFICADO con denominación) como AGIP se acepta y carga', async () => {

@@ -99,7 +99,7 @@ Campo: padronFile
 - Usar `?replace=true` para borrar todos los datos anteriores de ese tipo
 - Antes de cargar se valida la estructura del archivo y que su layout sea uno de los
   admitidos para ese tipo (ver [Que layout admite cada tipo](#que-layout-admite-cada-tipo-de-padron)).
-  Subir un padron con prefijo `P`/`R` (por ejemplo el de Cordoba) como `ARBA` o `AGIP` responde
+  Subir el unificado de AGIP como `ARBA`, o un padron con prefijo `P`/`R` como `AGIP`, responde
   `400 LAYOUT_MISMATCH` y no toca la base.
   `reload` aplica las mismas validaciones.
 - La carga corre en un **worker thread** con su propia conexion a SQLite, asi que las consultas
@@ -799,16 +799,19 @@ que se puede chequear es el layout. Por eso cada `padronType` declara que layout
 admite, y un upload o reload cuyo layout no coincide se rechaza con `400 LAYOUT_MISMATCH`
 **antes** de borrar o insertar nada, incluso con `?replace=true`.
 
-ARBA y AGIP publican el mismo layout `UNIFICADO`, asi que la politica **no** distingue
-un archivo de ARBA de uno de AGIP: el padron de ARBA subido como `AGIP` se carga igual.
-Lo que si frena es subir un padron con prefijo `P`/`R` (por ejemplo el de Cordoba) bajo
-`ARBA` o `AGIP`, o el unificado bajo un tipo que declare otro layout.
+ARBA se carga con sus padrones de regimenes generales, que vienen con prefijo `P` (percepcion)
+y `R` (retencion, por ejemplo `PadronRGSRet092026.TXT`). AGIP publica el unificado de 12 campos
+(`ARDJU008MMYYYY.TXT`). Como los layouts difieren, la politica frena el archivo de AGIP subido
+como `ARBA` (el error mas comun: el panel arranca con `ARBA` seleccionado) y el de ARBA subido
+como `AGIP`. Lo que no puede distinguir es un `P`/`R` de ARBA de uno de otra jurisdiccion, por
+ejemplo el de Cordoba. El unificado de ARBA (`PADRON_UNIFICADO_ARBA.txt`) queda rechazado con
+este default; si hiciera falta cargarlo, sumar `UNIFICADO` a la entrada de `ARBA`.
 
 Se configura en `.env`:
 
 ```
 # TIPO:LAYOUT[,LAYOUT]|TIPO:LAYOUT
-PADRON_LAYOUTS=ARBA:UNIFICADO|AGIP:UNIFICADO
+PADRON_LAYOUTS=ARBA:PERCEPCION,RETENCION|AGIP:UNIFICADO
 ```
 
 Ese es el valor por defecto si la variable no existe. Reglas:
