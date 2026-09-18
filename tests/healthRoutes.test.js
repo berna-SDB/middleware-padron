@@ -80,3 +80,11 @@ test('padron-info informa que layouts admite cada tipo', async () => {
   const santaFe = body.data.layoutsAdmitidos.find((t) => t.padronType === 'IIBB_SANTA_FE');
   assert.equal(santaFe.layouts, null, 'un tipo sin politica informa null');
 });
+
+test('health informa cada carga con su hora en UTC y en hora local', async () => {
+  const { body } = await getJson('/health');
+  assert.ok(body.data.ultimasCargas.length > 0, 'precondición: hay cargas registradas');
+  const carga = body.data.ultimasCargas[0];
+  assert.match(carga.fecha, /^\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}$/, 'fecha sigue siendo la de SQLite en UTC');
+  assert.match(carga.fechaLocal, /^\d{2}\/\d{2}\/\d{4} \d{2}:\d{2}$/, 'fechaLocal viene como DD/MM/YYYY HH:mm');
+});

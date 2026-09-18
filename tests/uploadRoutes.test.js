@@ -30,9 +30,9 @@ test.after(async () => {
   closeConnection();
 });
 
-async function upload(padronType, fixturePath, query = '') {
+async function upload(padronType, fixturePath, query = '', filename = path.basename(fixturePath)) {
   const form = new FormData();
-  form.append('padronFile', new Blob([fs.readFileSync(fixturePath)]), path.basename(fixturePath));
+  form.append('padronFile', new Blob([fs.readFileSync(fixturePath)]), filename);
   const res = await fetch(`${baseUrl}/upload/${padronType}${query}`, {
     method: 'POST',
     headers: { 'x-api-key': 'test-key' },
@@ -102,6 +102,17 @@ test('subir el padrón de percepción de Córdoba como IIBB_CORDOBA se acepta y 
   assert.equal(status, 202);
   const job = await waitForJob(body.data.jobId);
   assert.equal(job.recordsLoaded, 3);
+});
+
+test('un nombre de archivo con acentos se conserva bien en la respuesta, el job y el historial', async () => {
+  const nombre = '904 - Régimen de percepción.txt';
+  const { status, body } = await upload('IIBB_CORDOBA', FIXTURE_PERCEPCION, '', nombre);
+  assert.equal(status, 202);
+  assert.equal(body.data.filename, nombre);
+  const job = await waitForJob(body.data.jobId);
+  assert.ok(job.filename.endsWith(nombre), `job.filename: ${job.filename}`);
+  const meta = getConnection().prepare('SELECT filename FROM padron_metadata ORDER BY id DESC LIMIT 1').get();
+  assert.ok(meta.filename.endsWith(nombre), `metadata: ${meta.filename}`);
 });
 
 test('subir el padrón de retención de ARBA como IIBB_CORDOBA se rechaza con LAYOUT_MISMATCH', async () => {

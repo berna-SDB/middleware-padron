@@ -3,6 +3,7 @@ const { success } = require('../utils/responseBuilder');
 const { getStatements } = require('../database/queries');
 const { getStats } = require('../services/padronStats');
 const { acceptedLayouts } = require('../services/layoutPolicy');
+const { formatLocal } = require('../utils/dateUtils');
 
 const router = Router();
 
@@ -36,6 +37,7 @@ router.get('/', (req, res) => {
       archivo: m.filename,
       registros: m.records_loaded,
       fecha: m.loaded_at,
+      fechaLocal: formatLocal(m.loaded_at),
       estado: m.status,
     })),
     memoria: {
@@ -65,6 +67,7 @@ router.get('/padron-info', (req, res) => {
           archivo: meta.filename,
           registros: meta.records_loaded,
           fecha: meta.loaded_at,
+          fechaLocal: formatLocal(meta.loaded_at),
           estado: meta.status,
         } : null,
       };

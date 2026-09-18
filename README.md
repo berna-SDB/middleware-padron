@@ -145,6 +145,10 @@ GET /api/v1/upload/status/:jobId
 tiempo es `null`. `recordsDeleted` cuenta las filas anteriores borradas antes de insertar.
 Los jobs viven en memoria: tras un reinicio del servidor responden `404 JOB_NOT_FOUND`.
 
+Las horas de carga se guardan en UTC (`loaded_at`, `queuedAt`, `startedAt`, `completedAt`). El panel
+las muestra en hora de Argentina (o la zona de `TIMEZONE` en `.env`), y el health y `padron-info`
+agregan `fechaLocal` junto a `fecha`.
+
 ### Health check
 
 ```

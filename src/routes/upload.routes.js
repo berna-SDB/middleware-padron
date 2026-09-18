@@ -11,6 +11,16 @@ const logger = require('../logger');
 
 const router = Router();
 
+/**
+ * El navegador manda el nombre del archivo en UTF-8 y multer lo lee como
+ * latin1, asi que "Régimen" llega como "RÃ©gimen". Se vuelve a interpretar
+ * como UTF-8; si el resultado no es UTF-8 válido, se deja como vino.
+ */
+function decodeFilename(name) {
+  const decoded = Buffer.from(name, 'latin1').toString('utf8');
+  return decoded.includes('\uFFFD') ? name : decoded;
+}
+
 // Configurar multer para guardar archivos en disco
 const storage = multer.diskStorage({
   destination: (req, file, cb) => {
@@ -22,7 +32,7 @@ const storage = multer.diskStorage({
   },
   filename: (req, file, cb) => {
     const timestamp = Date.now();
-    cb(null, `${timestamp}-${file.originalname}`);
+    cb(null, `${timestamp}-${decodeFilename(file.originalname)}`);
   },
 });
 
@@ -82,14 +92,15 @@ router.post('/:padronType', upload.single('padronFile'), async (req, res) => {
   }
 
   const replace = req.query.replace === 'true';
+  const filename = decodeFilename(req.file.originalname);
   const jobId = loadPadronFile(req.file.path, upperType, { replace });
 
-  logger.info({ padronType: upperType, filename: req.file.originalname, jobId, replace }, 'Carga de padrón iniciada');
+  logger.info({ padronType: upperType, filename, jobId, replace }, 'Carga de padrón iniciada');
 
   res.status(202).json(success({
     message: replace ? 'Archivo recibido, reemplazando datos anteriores' : 'Archivo recibido, acumulando datos históricos',
     padronType: upperType,
-    filename: req.file.originalname,
+    filename,
     jobId,
   }));
 });

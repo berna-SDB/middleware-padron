@@ -3,6 +3,7 @@ const { getStatements } = require('../database/queries');
 const { getAllJobs } = require('../services/padronLoader');
 const { getStats } = require('../services/padronStats');
 const { acceptedLayouts } = require('../services/layoutPolicy');
+const { formatLocal } = require('../utils/dateUtils');
 const config = require('../config');
 
 const router = Router();
@@ -47,7 +48,7 @@ router.get('/', (req, res) => {
       <td>${m.padron_type}</td>
       <td>${m.filename}</td>
       <td>${m.records_loaded.toLocaleString()}</td>
-      <td>${m.loaded_at}</td>
+      <td title="${m.loaded_at} UTC">${formatLocal(m.loaded_at)}</td>
       <td><span class="badge ${m.status === 'completed' ? 'ok' : 'err'}">${m.status}</span></td>
     </tr>
   `).join('');
@@ -129,7 +130,7 @@ router.get('/', (req, res) => {
         <tr><th>Tipo</th><th>Registros</th></tr>
         ${countRows}
       </table>` : ''}
-      ${stats ? `<p class="hint">Totales calculados ${stats.computedAt}</p>` : ''}
+      ${stats ? `<p class="hint">Totales calculados ${formatLocal(stats.computedAt)} (hora Argentina)</p>` : ''}
     </div>
 
     ${periods.length > 0 ? `
@@ -185,7 +186,7 @@ router.get('/', (req, res) => {
     <div class="card">
       <h2>Historial de cargas</h2>
       <table>
-        <tr><th>Tipo</th><th>Archivo</th><th>Registros</th><th>Fecha</th><th>Estado</th></tr>
+        <tr><th>Tipo</th><th>Archivo</th><th>Registros</th><th>Fecha (hora Argentina)</th><th>Estado</th></tr>
         ${metaRows}
       </table>
     </div>` : ''}

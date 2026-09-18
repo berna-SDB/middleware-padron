@@ -2,6 +2,8 @@ require('dotenv').config();
 
 module.exports = {
   PORT: parseInt(process.env.PORT, 10) || 3000,
+  // Zona horaria para mostrar horas en el panel y en el API. Los datos se guardan en UTC.
+  TIMEZONE: process.env.TIMEZONE || 'America/Argentina/Buenos_Aires',
   API_KEY: process.env.API_KEY || 'change-me-in-production',
   DB_PATH: process.env.DB_PATH || './data/padron.db',
   UPLOAD_DIR: process.env.UPLOAD_DIR || './data/padrones',
