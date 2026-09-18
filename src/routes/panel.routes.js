@@ -2,6 +2,7 @@ const { Router } = require('express');
 const { getStatements } = require('../database/queries');
 const { getAllJobs } = require('../services/padronLoader');
 const { getStats } = require('../services/padronStats');
+const { acceptedLayouts } = require('../services/layoutPolicy');
 const config = require('../config');
 
 const router = Router();
@@ -18,6 +19,20 @@ router.get('/', (req, res) => {
   const pendiente = '<span title="Se calcula en segundo plano al arrancar y al terminar cada carga">calculando…</span>';
 
   const padronTypes = config.ALLOWED_PADRON_TYPES.map(t => `<option value="${t}">${t}</option>`).join('');
+
+  // Qué archivo acepta cada tipo (ver src/services/layoutPolicy.js): se muestra
+  // como tarjeta y, al subir, debajo del selector, para no cargar el archivo de
+  // una jurisdicción bajo el tipo de otra.
+  const formatos = acceptedLayouts();
+  const formatoRows = formatos.map((f) => (f.layouts
+    ? f.layouts.map((l, i) => `
+    <tr>
+      ${i === 0 ? `<td rowspan="${f.layouts.length}"><strong>${f.padronType}</strong></td>` : ''}
+      <td><code>${l.name}</code></td><td>${l.organismo}</td><td>${l.archivo || '-'}</td><td>${l.descripcion}</td>
+    </tr>`).join('')
+    : `
+    <tr><td><strong>${f.padronType}</strong></td><td colspan="4" class="hint">Sin politica: acepta cualquier layout</td></tr>`
+  )).join('');
 
   const countRows = countByType.map(r => `
     <tr><td>${r.padronType}</td><td>${r.total.toLocaleString()}</td></tr>
@@ -131,6 +146,7 @@ router.get('/', (req, res) => {
       <div class="form-row">
         <select id="padronType">${padronTypes}</select>
       </div>
+      <p class="hint" id="layoutHint"></p>
       <div class="upload-area" id="dropZone" onclick="document.getElementById('fileInput').click()">
         <div class="icon">📁</div>
         <p><strong>Click para seleccionar</strong> o arrastra el archivo aqui</p>
@@ -144,6 +160,15 @@ router.get('/', (req, res) => {
         <div class="progress-bar"><div class="fill" id="progressFill" style="width:0%"></div></div>
         <p class="progress-text" id="progressText">Subiendo archivo...</p>
       </div>
+    </div>
+
+    <div class="card">
+      <h2>Formatos admitidos por tipo</h2>
+      <table>
+        <tr><th>Tipo</th><th>Layout</th><th>Organismo</th><th>Archivo</th><th>Como reconocerlo</th></tr>
+        ${formatoRows}
+      </table>
+      <p class="hint">Un archivo con otro layout se rechaza con LAYOUT_MISMATCH antes de tocar la base. Se configura con PADRON_LAYOUTS en el .env.</p>
     </div>
 
     <div class="card">
@@ -171,6 +196,20 @@ router.get('/', (req, res) => {
     if (!API_KEY) API_KEY = '';
 
     var selectedFile = null;
+
+    // Formatos admitidos por tipo, para el aviso debajo del selector
+    var FORMATOS = ${JSON.stringify(formatos)};
+    function updateLayoutHint() {
+      var tipo = document.getElementById('padronType').value;
+      var entry = FORMATOS.filter(function(f) { return f.padronType === tipo; })[0];
+      var el = document.getElementById('layoutHint');
+      if (!entry || !entry.layouts) { el.textContent = tipo + ' acepta cualquier layout (sin politica).'; return; }
+      el.textContent = tipo + ' acepta: ' + entry.layouts.map(function(l) {
+        return (l.archivo ? l.archivo + ' ' : '') + '(' + l.name + ')';
+      }).join(', ');
+    }
+    document.getElementById('padronType').addEventListener('change', updateLayoutHint);
+    updateLayoutHint();
 
     // Drag & drop
     var dropZone = document.getElementById('dropZone');

@@ -69,3 +69,14 @@ test('tras una carga, health y padron-info devuelven los totales desde la caché
   assert.equal(info.body.data.padrones[0].padronType, 'AGIP');
   assert.equal(info.body.data.padrones[0].totalRegistros, esperado);
 });
+
+test('padron-info informa que layouts admite cada tipo', async () => {
+  const { body } = await getJson('/padron-info');
+  const arba = body.data.layoutsAdmitidos.find((t) => t.padronType === 'ARBA');
+  assert.deepEqual(arba.layouts.map((l) => l.name), ['RGS_PERCEPCION', 'RGS_RETENCION']);
+  assert.equal(arba.layouts[1].archivo, 'PadronRGSRetMMAAAA.txt');
+  const cordoba = body.data.layoutsAdmitidos.find((t) => t.padronType === 'IIBB_CORDOBA');
+  assert.deepEqual(cordoba.layouts.map((l) => l.name), ['LUA_PERCEPCION', 'LUA_RETENCION']);
+  const santaFe = body.data.layoutsAdmitidos.find((t) => t.padronType === 'IIBB_SANTA_FE');
+  assert.equal(santaFe.layouts, null, 'un tipo sin politica informa null');
+});

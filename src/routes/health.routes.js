@@ -2,6 +2,7 @@ const { Router } = require('express');
 const { success } = require('../utils/responseBuilder');
 const { getStatements } = require('../database/queries');
 const { getStats } = require('../services/padronStats');
+const { acceptedLayouts } = require('../services/layoutPolicy');
 
 const router = Router();
 
@@ -51,6 +52,7 @@ router.get('/padron-info', (req, res) => {
 
   res.json(success({
     stats: statsInfo(stats),
+    layoutsAdmitidos: acceptedLayouts(),
     padrones: (stats ? stats.byType : []).map(t => {
       const meta = metadata.find(m => m.padron_type === t.padronType);
       return {
