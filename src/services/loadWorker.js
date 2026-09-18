@@ -14,38 +14,92 @@ const { getConnection, closeConnection } = require('../database/connection');
 const { getStatements } = require('../database/queries');
 const { parsePadronFile } = require('./padronParser');
 const { computeStats } = require('./padronStats');
+const { tryAcquireLoadLock, assertLoadLockOwner, releaseLoadLock } = require('./loadLock');
 const logger = require('../logger');
 
 const BATCH_SIZE = 10000;
 const DELETE_CHUNK = 50000;
 const PROGRESS_EVERY = 100000;
+const LOCK_POLL_MS = 2000;
 
 const post = (msg) => parentPort.postMessage(msg);
+const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 
 /**
  * Repite un DELETE con LIMIT hasta que borre menos filas que el límite.
- * Cada lote es su propia transacción, corta y con WAL acotado.
+ * Cada lote es su propia transacción, corta y con WAL acotado, que empieza
+ * comprobando que el candado sigue siendo de este job (y renovando su latido).
  */
-function deleteInChunks(runChunk) {
+function deleteInChunks(db, jobId, runChunk) {
+  const chunk = db.transaction(() => {
+    assertLoadLockOwner(db, jobId);
+    return runChunk();
+  });
   let total = 0;
   for (;;) {
-    const { changes } = runChunk();
+    const { changes } = chunk.immediate();
     total += changes;
     if (changes > 0) post({ type: 'deleting', deleted: total });
     if (changes < DELETE_CHUNK) return total;
   }
 }
 
-async function runLoad({ jobId, filePath, padronType, replace }) {
+/**
+ * Toma el candado de carga o espera a que se libere. Mientras espera avisa
+ * una vez al hilo principal ('waiting') para que el job figure en cola, y al
+ * conseguirlo avisa 'started'.
+ */
+async function acquireLoadLockOrWait(db, { jobId, padronType }) {
+  let waiting = false;
+  for (;;) {
+    const result = tryAcquireLoadLock(db, { jobId, padronType });
+    if (result.acquired) {
+      if (result.tookOverFrom) {
+        const { job_id, host, pid, heartbeat_at } = result.tookOverFrom;
+        logger.warn({ jobId, staleJobId: job_id, host, pid, heartbeatAt: heartbeat_at }, 'Candado de carga vencido: se toma');
+      }
+      if (waiting) post({ type: 'started' });
+      return;
+    }
+    if (!waiting) {
+      waiting = true;
+      const holder = result.holder
+        ? { jobId: result.holder.job_id, padronType: result.holder.padron_type, host: result.holder.host, pid: result.holder.pid }
+        : null;
+      post({ type: 'waiting', holder });
+      logger.info({ jobId, holder, busy: result.busy }, 'Otra carga tiene el candado: se espera');
+    }
+    await sleep(LOCK_POLL_MS);
+  }
+}
+
+async function runLoad(task) {
   const db = getConnection();
+  const { jobId } = task;
+
+  await acquireLoadLockOrWait(db, task);
+  let outcome;
+  try {
+    outcome = await runLoadLocked(db, task);
+  } finally {
+    releaseLoadLock(db, jobId);
+  }
+  // Se avisa después de liberar: cuando el hilo principal recibe 'done', el
+  // candado ya está disponible para la siguiente carga.
+  post({ type: 'done', ...outcome });
+}
+
+/** Cuerpo de la carga. Solo se ejecuta con el candado tomado. */
+async function runLoadLocked(db, { jobId, filePath, padronType, replace }) {
   const stmts = getStatements();
 
   if (replace) {
-    const deleted = deleteInChunks(() => stmts.deleteByTypeChunk.run(padronType, DELETE_CHUNK));
+    const deleted = deleteInChunks(db, jobId, () => stmts.deleteByTypeChunk.run(padronType, DELETE_CHUNK));
     logger.info({ padronType, deleted, jobId }, 'Registros anteriores eliminados');
   }
 
   const insertBatch = db.transaction((batch) => {
+    assertLoadLockOwner(db, jobId);
     for (const r of batch) {
       stmts.insertEntry.run(
         r.padronType, r.regimen, r.fechaPublicacion, r.fechaDesde, r.fechaHasta,
@@ -69,7 +123,7 @@ async function runLoad({ jobId, filePath, padronType, replace }) {
     if (purgedPeriods.has(key)) return;
     purgedPeriods.add(key);
 
-    const deleted = deleteInChunks(() => stmts.deleteByTypeAndPeriodChunk.run(
+    const deleted = deleteInChunks(db, jobId, () => stmts.deleteByTypeAndPeriodChunk.run(
       padronType, record.regimen, record.fechaDesde, record.fechaHasta, DELETE_CHUNK
     ));
     if (deleted > 0) {
@@ -87,7 +141,7 @@ async function runLoad({ jobId, filePath, padronType, replace }) {
 
   function flush() {
     if (batch.length === 0) return;
-    insertBatch(batch);
+    insertBatch.immediate(batch);
     totalLoaded += batch.length;
     batch = [];
     post({ type: 'progress', recordsLoaded: totalLoaded });
@@ -124,7 +178,7 @@ async function runLoad({ jobId, filePath, padronType, replace }) {
 
   logger.info({ padronType, totalLoaded, jobId }, 'Carga de padrón completada');
 
-  post({ type: 'done', totalLoaded, stats: computeStats() });
+  return { totalLoaded, stats: computeStats() };
 }
 
 async function main() {

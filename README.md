@@ -105,6 +105,16 @@ Campo: padronFile
 - La carga corre en un **worker thread** con su propia conexion a SQLite, asi que las consultas
   por CUIT siguen respondiendo mientras se borra e inserta. Las cargas se ejecutan **de a una**:
   si llega otra mientras hay una en curso, queda en cola (`status: "queued"`).
+- Ademas de la cola en memoria, cada carga toma un **candado en la base** (tabla `load_lock`)
+  antes de borrar o insertar, y lo libera al terminar, incluso con error. Asi dos cargas nunca
+  corren a la vez aunque haya varias instancias de PM2 o mas de un proceso: la segunda espera
+  (`status: "queued"`, con `waitingFor` indicando el job que tiene el candado). Sin esto, dos
+  cargas del mismo periodo en paralelo dejaban filas duplicadas: la purga de la segunda solo
+  borraba lo que la primera ya habia insertado. Cada lote de borrado o insercion comprueba,
+  dentro de su propia transaccion, que el candado sigue siendo suyo: una carga que lo perdio
+  falla ahi mismo sin escribir una fila mas. Un candado cuyo proceso murio sin liberarlo se
+  considera vencido (proceso inexistente en el mismo host, o 30 minutos sin latir) y la
+  siguiente carga lo toma. Si hiciera falta liberarlo a mano: `DELETE FROM load_lock`.
 - Los borrados (del tipo entero con `replace=true`, o del periodo repetido en modo acumular) se
   hacen en lotes de 50.000 filas para que el WAL no crezca al tamaño del periodo.
 
@@ -129,8 +139,10 @@ GET /api/v1/upload/status/:jobId
 }
 ```
 
-`status` pasa por `queued` (esperando que termine otra carga), `loading`, y termina en
-`completed` o `error`. `recordsDeleted` cuenta las filas anteriores borradas antes de insertar.
+`status` pasa por `queued` (esperando que termine otra carga, en este proceso o en otro),
+`loading`, y termina en `completed` o `error`. Mientras espera el candado de otro proceso,
+`waitingFor` trae `{ jobId, padronType, host, pid }` de la carga que lo tiene; el resto del
+tiempo es `null`. `recordsDeleted` cuenta las filas anteriores borradas antes de insertar.
 Los jobs viven en memoria: tras un reinicio del servidor responden `404 JOB_NOT_FOUND`.
 
 ### Health check
@@ -859,6 +871,10 @@ cd /opt/middleware-padron
 git pull
 pm2 restart middleware-padron
 ```
+
+Actualizar con `pm2 restart` (no `pm2 reload`) y sin cargas en curso: un `reload` deja conviviendo
+por unos segundos la instancia vieja con la nueva, y una carga que siguiera corriendo en la vieja
+no conoceria el candado de carga de la nueva.
 
 Al arrancar se corren las migraciones del esquema antes de abrir el puerto. La primera vez que
 levanta esta version sobre una base grande elimina dos indices redundantes (`idx_cuit` e

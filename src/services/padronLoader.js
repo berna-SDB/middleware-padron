@@ -43,6 +43,7 @@ function loadPadronFile(filePath, padronType, options = {}) {
     padronType,
     filename: path.basename(filePath),
     status: 'queued',
+    waitingFor: null,
     recordsDeleted: 0,
     recordsLoaded: 0,
     queuedAt: new Date().toISOString(),
@@ -79,6 +80,17 @@ function runNext() {
 
   worker.on('message', (msg) => {
     switch (msg.type) {
+      case 'waiting':
+        // Otro proceso tiene el candado de carga (ver loadLock.js): el job
+        // vuelve a la cola hasta que el worker lo consiga.
+        job.status = 'queued';
+        job.waitingFor = msg.holder;
+        break;
+      case 'started':
+        job.status = 'loading';
+        job.waitingFor = null;
+        job.startedAt = new Date().toISOString();
+        break;
       case 'deleting':
         job.recordsDeleted = msg.deleted;
         break;
@@ -102,7 +114,7 @@ function runNext() {
   worker.on('error', (err) => fail(job, err.message));
 
   worker.on('exit', (code) => {
-    if (job.status === 'loading') {
+    if (job.status === 'loading' || job.status === 'queued') {
       fail(job, `el worker de carga terminó con código ${code} sin completar`);
     }
     running = null;

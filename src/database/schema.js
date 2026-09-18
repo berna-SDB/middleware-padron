@@ -36,6 +36,20 @@ function initializeSchema() {
       loaded_at       TEXT    DEFAULT (datetime('now')),
       status          TEXT    NOT NULL DEFAULT 'completed'
     );
+
+    -- Candado de carga (ver src/services/loadLock.js). Una sola fila posible:
+    -- quien logra insertarla es el único que puede borrar e insertar en
+    -- padron_entries. Vive en la base, no en memoria, para que valga entre
+    -- procesos (varias instancias de PM2) y no solo dentro de uno.
+    CREATE TABLE IF NOT EXISTS load_lock (
+      id            INTEGER PRIMARY KEY CHECK (id = 1),
+      job_id        TEXT    NOT NULL,
+      padron_type   TEXT    NOT NULL,
+      host          TEXT    NOT NULL,
+      pid           INTEGER NOT NULL,
+      acquired_at   INTEGER NOT NULL,
+      heartbeat_at  INTEGER NOT NULL
+    );
   `);
 
   runMigrations(db);
