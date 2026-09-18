@@ -13,5 +13,5 @@ module.exports = {
   // Un tipo sin entrada acepta cualquier layout. Vacío explícito (PADRON_LAYOUTS=) desactiva la política.
   PADRON_LAYOUTS: process.env.PADRON_LAYOUTS !== undefined
     ? process.env.PADRON_LAYOUTS
-    : 'ARBA:PERCEPCION,RETENCION|AGIP:UNIFICADO',
+    : 'ARBA:RGS_PERCEPCION,RGS_RETENCION|AGIP:UNIFICADO|IIBB_CORDOBA:LUA_PERCEPCION,LUA_RETENCION',
 };

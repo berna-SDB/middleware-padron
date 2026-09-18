@@ -8,14 +8,20 @@ const logger = require('../logger');
  *
  * Los padrones con prefijo de régimen (P/R) comparten la misma cabecera
  * (regimen;fechaPublicacion;fechaDesde;fechaHasta;cuit;tipo;alta;baja) y solo
- * difieren en la cola de alícuotas.
+ * difieren en la cola de alícuotas. Dos organismos los publican con diseños
+ * distintos, y por eso cada familia P/R tiene dos variantes (ver detectLayout):
+ *
+ * - RGS: padrón de regímenes generales de ARBA (PadronRGSPer / PadronRGSRet).
+ *   Trae la alícuota y el número de grupo, y termina en ";".
+ * - LUA: listado único de alícuotas de Rentas Córdoba (Anexo XIII de la RN
+ *   1/2023). 9 campos, sin grupo, marca de sujeto fija "X".
  *
  * `regimen` indica qué alícuotas trae el archivo: 'P' percepción, 'R' retención,
  * 'AMBOS' las dos. Se guarda en cada registro para que padrones de percepción y
  * retención de la misma jurisdicción puedan convivir bajo un mismo padronType.
  */
 const FORMATS = {
-  // Padrón unificado (el que publica ARBA), sin prefijo. El campo 12 (denominación) es opcional.
+  // Padrón unificado (el de AGIP; ARBA también publica uno), sin prefijo. El campo 12 (denominación) es opcional.
   // fechaPub;desde;hasta;cuit;tipo;alta;baja;alicPerc;alicRet;grupoPerc;grupoRet[;denominacion]
   UNIFICADO: {
     name: 'UNIFICADO',
@@ -36,8 +42,8 @@ const FORMATS = {
     },
   },
 
-  // Régimen de percepción. Sin códigos de grupo.
-  // P;fechaPub;desde;hasta;cuit;tipo;alta;baja;alicPerc
+  // Régimen de percepción. El grupo (campo 10) solo viene en la variante RGS.
+  // P;fechaPub;desde;hasta;cuit;tipo;alta;baja;alicPerc[;grupoPerc;]
   PERCEPCION: {
     name: 'PERCEPCION',
     regimen: 'P',
@@ -51,15 +57,16 @@ const FORMATS = {
       marcaAlta: 6,
       marcaBaja: 7,
       alicuotaPercepcion: 8,
+      grupoPercepcion: 9,
     },
   },
 
-  // Régimen de retención.
-  // R;fechaPub;desde;hasta;cuit;tipo;alta;baja;alicRet;grupoRet
+  // Régimen de retención. El grupo (campo 10) solo viene en la variante RGS.
+  // R;fechaPub;desde;hasta;cuit;tipo;alta;baja;alicRet[;grupoRet;]
   RETENCION: {
     name: 'RETENCION',
     regimen: 'R',
-    minFields: 10,
+    minFields: 9,
     fields: {
       fechaPublicacion: 1,
       fechaDesde: 2,
@@ -73,6 +80,14 @@ const FORMATS = {
     },
   },
 };
+
+/** Nombres de layout que puede informar la validación (ver detectLayout). */
+const LAYOUTS = ['UNIFICADO', 'RGS_PERCEPCION', 'RGS_RETENCION', 'LUA_PERCEPCION', 'LUA_RETENCION'];
+
+/** Familia de un layout: el nombre del FORMAT que lo parsea. */
+function layoutFamily(layout) {
+  return layout.replace(/^(RGS|LUA)_/, '');
+}
 
 /**
  * Convierte alícuota de formato argentino (coma decimal) a float.
@@ -97,7 +112,7 @@ function isValidCuit(value) {
 }
 
 /**
- * Determina el layout de una línea a partir de su primer campo.
+ * Determina el formato (familia) de una línea a partir de su primer campo.
  * Retorna null si no coincide con ninguno (típicamente, una línea de header).
  */
 function detectFormat(fields) {
@@ -106,6 +121,23 @@ function detectFormat(fields) {
   if (first === 'R') return FORMATS.RETENCION;
   if (/^\d{8}$/.test(first)) return FORMATS.UNIFICADO;
   return null;
+}
+
+/** Un P/R con número de grupo en el campo 10 es el diseño de ARBA (RGS). */
+function hasGrupo(fields) {
+  return fields.length >= 10 && /^\d{1,2}$/.test((fields[9] || '').trim());
+}
+
+/**
+ * Determina el layout de una línea: la familia por el primer campo y, para los
+ * P/R, la variante por la presencia del grupo. Retorna null si no coincide con
+ * ninguno (típicamente, una línea de header).
+ */
+function detectLayout(fields) {
+  const format = detectFormat(fields);
+  if (!format) return null;
+  if (format === FORMATS.UNIFICADO) return format.name;
+  return `${hasGrupo(fields) ? 'RGS' : 'LUA'}_${format.name}`;
 }
 
 /**
@@ -145,9 +177,10 @@ function buildRecord(fields, format, padronType) {
   const fechaDesde = parsePadronDate(fields[idx.fechaDesde].trim());
   const fechaPublicacion = parsePadronDate(fields[idx.fechaPublicacion].trim());
 
+  // Campo ausente (variante sin grupo) o en "00": sin grupo.
   const grupo = (campo) => {
     const raw = at(campo);
-    if (raw === null) return null;
+    if (raw === null || raw === undefined) return null;
     return parseInt(raw, 10) || null;
   };
 
@@ -170,7 +203,8 @@ function buildRecord(fields, format, padronType) {
 
 /**
  * Valida las primeras N líneas de un archivo sin cargarlo.
- * Retorna un reporte de validación incluyendo el formato detectado.
+ * Retorna un reporte de validación incluyendo el layout detectado (`formato`,
+ * por ejemplo RGS_RETENCION) y su familia (`familia`, por ejemplo RETENCION).
  */
 async function validatePadronFile(filePath, maxLines = 100) {
   const stream = fs.createReadStream(filePath, { encoding: 'latin1' });
@@ -180,6 +214,7 @@ async function validatePadronFile(filePath, maxLines = 100) {
   let lineNum = 0;
   let valid = 0;
   let format = null;
+  let layout = null;
   let sampleFields = null;
 
   for await (const line of rl) {
@@ -197,6 +232,7 @@ async function validatePadronFile(filePath, maxLines = 100) {
         errors.push(`Línea ${lineNum}: no coincide con ningún formato conocido (esperado DDMMYYYY, "P" o "R" en el primer campo, se encontró "${fields[0]}")`);
         break;
       }
+      layout = detectLayout(fields);
       sampleFields = fields.length;
     }
 
@@ -215,7 +251,8 @@ async function validatePadronFile(filePath, maxLines = 100) {
 
   return {
     valid: errors.length === 0 && valid > 0,
-    formato: format ? format.name : null,
+    formato: layout,
+    familia: format ? format.name : null,
     regimen: format ? format.regimen : null,
     linesChecked: lineNum,
     validLines: valid,
@@ -236,6 +273,7 @@ async function* parsePadronFile(filePath, padronType) {
   let parsed = 0;
   let skipped = 0;
   let format = null;
+  let layout = null;
   const skipReasons = {};
 
   for await (const line of rl) {
@@ -250,7 +288,8 @@ async function* parsePadronFile(filePath, padronType) {
         logger.info({ lineNum }, 'Línea sin formato reconocible al inicio, se asume header');
         continue;
       }
-      logger.info({ filePath, formato: format.name, regimen: format.regimen }, 'Formato de padrón detectado');
+      layout = detectLayout(fields);
+      logger.info({ filePath, formato: layout, regimen: format.regimen }, 'Formato de padrón detectado');
     }
 
     const error = validateLine(fields, lineNum, format);
@@ -268,7 +307,7 @@ async function* parsePadronFile(filePath, padronType) {
     yield buildRecord(fields, format, padronType);
   }
 
-  logger.info({ filePath, formato: format?.name, lineNum, parsed, skipped, skipReasons }, 'Archivo parseado completamente');
+  logger.info({ filePath, formato: layout, lineNum, parsed, skipped, skipReasons }, 'Archivo parseado completamente');
 }
 
-module.exports = { parsePadronFile, validatePadronFile, detectFormat, FORMATS };
+module.exports = { parsePadronFile, validatePadronFile, detectFormat, detectLayout, layoutFamily, FORMATS, LAYOUTS };

@@ -12,6 +12,7 @@ const createApp = require('../src/app');
 const FIXTURE_UNIFICADO = path.join(__dirname, 'fixtures', 'sample-padron.txt');
 const FIXTURE_PERCEPCION = path.join(__dirname, 'fixtures', 'sample-percepcion.txt');
 const FIXTURE_AGIP = path.join(__dirname, 'fixtures', 'sample-agip.txt');
+const FIXTURE_ARBA_RET = path.join(__dirname, 'fixtures', 'sample-arba-retencion.txt');
 const UPLOAD_DIR = process.env.UPLOAD_DIR;
 
 let server;
@@ -81,18 +82,39 @@ test('subir el padrón de percepción (prefijo P) como AGIP se rechaza con LAYOU
   assert.deepEqual(uploadedFiles(), before, 'el archivo rechazado debe borrarse del UPLOAD_DIR');
 });
 
-test('subir el padrón de percepción (prefijo P) como ARBA se acepta y carga: ARBA se carga con sus P/R', async () => {
+test('subir el padrón de percepción de Córdoba (LUA, prefijo P sin grupo) como ARBA se rechaza con LAYOUT_MISMATCH', async () => {
   const { status, body } = await upload('ARBA', FIXTURE_PERCEPCION);
+  assert.equal(status, 400);
+  assert.equal(body.error.code, 'LAYOUT_MISMATCH');
+  assert.match(body.error.message, /LUA_PERCEPCION/);
+  assert.match(body.error.message, /RGS_PERCEPCION, RGS_RETENCION/);
+});
+
+test('subir el padrón de retención de ARBA (RGS, prefijo R con grupo) como ARBA se acepta y carga', async () => {
+  const { status, body } = await upload('ARBA', FIXTURE_ARBA_RET);
   assert.equal(status, 202);
   const job = await waitForJob(body.data.jobId);
   assert.equal(job.recordsLoaded, 3);
+});
+
+test('subir el padrón de percepción de Córdoba como IIBB_CORDOBA se acepta y carga', async () => {
+  const { status, body } = await upload('IIBB_CORDOBA', FIXTURE_PERCEPCION);
+  assert.equal(status, 202);
+  const job = await waitForJob(body.data.jobId);
+  assert.equal(job.recordsLoaded, 3);
+});
+
+test('subir el padrón de retención de ARBA como IIBB_CORDOBA se rechaza con LAYOUT_MISMATCH', async () => {
+  const { status, body } = await upload('IIBB_CORDOBA', FIXTURE_ARBA_RET);
+  assert.equal(status, 400);
+  assert.equal(body.error.code, 'LAYOUT_MISMATCH');
 });
 
 test('subir el padrón UNIFICADO como ARBA se rechaza con LAYOUT_MISMATCH: es el layout de AGIP', async () => {
   const { status, body } = await upload('ARBA', FIXTURE_UNIFICADO);
   assert.equal(status, 400);
   assert.equal(body.error.code, 'LAYOUT_MISMATCH');
-  assert.match(body.error.message, /PERCEPCION, RETENCION/);
+  assert.match(body.error.message, /RGS_PERCEPCION, RGS_RETENCION/);
 });
 
 test('subir el padrón de AGIP (layout UNIFICADO con denominación) como AGIP se acepta y carga', async () => {

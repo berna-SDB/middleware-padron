@@ -6,7 +6,7 @@ const config = require('../config');
 const { success, errorResponse } = require('../utils/responseBuilder');
 const { loadPadronFile, getJob } = require('../services/padronLoader');
 const { validatePadronFile } = require('../services/padronParser');
-const { checkLayoutPolicy } = require('../services/layoutPolicy');
+const { checkLayoutPolicy, describeLayout } = require('../services/layoutPolicy');
 const logger = require('../logger');
 
 const router = Router();
@@ -49,7 +49,7 @@ async function rejectIfInvalid(filePath, padronType) {
     logger.warn({ padronType, formato: validation.formato, expected: policy.expected }, 'Layout de archivo no admitido para el tipo de padrón');
     return errorResponse(
       'LAYOUT_MISMATCH',
-      `El archivo tiene layout ${validation.formato}, pero el tipo ${padronType} solo admite: ${policy.expected.join(', ')}. ` +
+      `El archivo tiene layout ${validation.formato} (${describeLayout(validation.formato)}), pero el tipo ${padronType} solo admite: ${policy.expected.join(', ')}. ` +
       'Verificá que estés subiendo el padrón correcto para esa jurisdicción.'
     );
   }

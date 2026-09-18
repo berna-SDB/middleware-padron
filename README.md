@@ -99,8 +99,8 @@ Campo: padronFile
 - Usar `?replace=true` para borrar todos los datos anteriores de ese tipo
 - Antes de cargar se valida la estructura del archivo y que su layout sea uno de los
   admitidos para ese tipo (ver [Que layout admite cada tipo](#que-layout-admite-cada-tipo-de-padron)).
-  Subir el unificado de AGIP como `ARBA`, o un padron con prefijo `P`/`R` como `AGIP`, responde
-  `400 LAYOUT_MISMATCH` y no toca la base.
+  Subir el unificado de AGIP como `ARBA`, el listado de Cordoba como `ARBA` o un padron con
+  prefijo `P`/`R` como `AGIP` responde `400 LAYOUT_MISMATCH` y no toca la base.
   `reload` aplica las mismas validaciones.
 - La carga corre en un **worker thread** con su propia conexion a SQLite, asi que las consultas
   por CUIT siguen respondiendo mientras se borra e inserta. Las cargas se ejecutan **de a una**:
@@ -721,6 +721,78 @@ Para **reemplazar** todos los datos de un tipo: agregar `?replace=true` a la URL
 
 ---
 
+### Que archivo corresponde a cada tipo
+
+El archivo no trae ningun campo que diga a que tipo va, y el panel arranca con `ARBA`
+seleccionado. Ya paso subir un archivo bajo el tipo equivocado: el de AGIP como `ARBA` el
+03/09 y el 11/09, y el de Cordoba como `ARBA` el 18/09. Antes de subir, confirmar con esta tabla.
+
+Los archivos suelen venir numerados con el **codigo de jurisdiccion del Convenio Multilateral**:
+901 es Ciudad de Buenos Aires, 902 es Provincia de Buenos Aires y 904 es Cordoba (tabla oficial
+de la Comision Arbitral: https://www.ca.gob.ar/datos-jurisdicciones).
+
+| Tipo | Organismo | Archivo | Layout | Como reconocerlo por dentro | Filas aprox. |
+|------|-----------|---------|--------|-----------------------------|--------------|
+| `AGIP` | AGIP, Ciudad de Buenos Aires (901) | `ARDJU008MMAAAA.TXT` | `UNIFICADO`, 12 campos | Primer campo fecha, los dos grupos en `00`, denominacion en el campo 12, tipo `D` o `C`, publicado alrededor del 26 del mes anterior | 1,6 M |
+| `ARBA` | ARBA, Provincia de Buenos Aires (902) | `PadronRGSRetMMAAAA.txt` (retencion) y `PadronRGSPerMMAAAA.txt` (percepcion), dentro de `PadronRGSMMAAAA.zip` | `RETENCION` (`R`) y `PERCEPCION` (`P`) | Prefijo `R` o `P`, grupo de `00` a `24`, tipo `D` o `C`, marcas `N` o `S`, publicado entre el 25 y el 27 del mes anterior | 2,6 M |
+| `IIBB_CORDOBA` | Rentas Cordoba (904) | `904 - Regimen de percepcion.txt` | `PERCEPCION` (`P`), 9 campos | Prefijo `P`, **sin grupo**, tipo `N`, `L` o `C`, marca `X`, publicado alrededor del 22 del mes anterior | 830 k |
+
+ARBA publica ademas un padron unificado (`PADRON_UNIFICADO_ARBA.txt`, 4,4 M de filas, layout
+`UNIFICADO` de 11 campos con grupos reales). No es el que se carga: la politica por defecto lo
+rechaza bajo `ARBA`.
+
+#### Diseños de registro oficiales
+
+Los tres organismos publican el diseño de sus archivos. Es lo que permite reconocer un archivo
+por su contenido cuando el nombre no alcanza:
+
+- **ARBA, "Regimen de recaudacion por sujeto, nuevo diseño de registro de padrones"**
+  (https://www.arba.gov.ar/archivos/Publicaciones/regimen%20de%20rec%20x%20sujeto_nuevo%20dise%C3%B1o%20padr%C3%B3n.pdf).
+  Un mismo diseño para retencion y percepcion, 55 caracteres:
+  `Regimen (R/P);FechaPublicacion;VigenciaDesde;VigenciaHasta;CUIT;TipoContribuyente;MarcaAltaBaja;MarcaCambioAlicuota;Alicuota;NroGrupo;`
+  Tipo de contribuyente `C` (Convenio Multilateral) o `D` (directo de la Provincia). Marca alta/baja
+  `S` (se incorpora) o `B` (baja). Alicuota `9,99`. Grupo de 2 digitos. Termina en `;`.
+- **AGIP, "Diseño de registro de padron unificado"**
+  (https://www.agip.gob.ar/filemanager/source/Agentes/De%20Recaudacion/Ingresos%20brutos/Contrib%20Exentos/DISENOODEREGISTROPADRONUNIFICADO.pdf),
+  el mismo de 12 campos que trae `ARDJU008MMAAAA.TXT`, 121 caracteres:
+  `FechaPublicacion;VigenciaDesde;VigenciaHasta;CUIT;TipoContribuyente;MarcaAltaSujeto;MarcaAlicuota;AlicuotaPercepcion;AlicuotaRetencion;GrupoPercepcion;GrupoRetencion;RazonSocial`
+  Tipo `D` (directo CABA) o `C` (Convenio). Marcas `S`, `N` o `B`. Alicuotas `9,99`. Los dos grupos
+  "deberan estar en ceros" (`00`). Razon social de hasta 60 caracteres.
+- **Rentas Cordoba, Anexo XIII de la Resolucion Normativa 1/2023 (art. 384), "Listados unicos de
+  alicuotas, diseño de archivo"**, pagina 39 de
+  https://www.rentascordoba.gob.ar/cms/wp-content/uploads/2024/04/anexo_resolucion_normativa_n%C2%B0_12023_%E2%80%93actualizada-vigente.pdf.
+  9 campos, 52 caracteres, sin grupo y sin `;` final:
+  `Regimen;FechaPublicacion;VigenciaDesde;VigenciaHasta;CUIT;TipoContribuyente;MarcaSujeto;MarcaCambioAlicuota;Alicuota`
+  Regimen `R` (retencion), `P` (percepcion), `T` (tarjetas) o `S` (servicios publicos). Tipo de
+  contribuyente `C` (Convenio Multilateral), `L` (local de Cordoba) o `N` (sujeto no pasible).
+  Marca sujeto siempre `X`. Alicuota `99,99` en porcentaje.
+
+Con eso, un archivo `P`/`R` se reconoce por contenido: si trae numero de grupo en el campo 10 es
+el diseño de ARBA y el parser lo informa como `RGS_PERCEPCION` o `RGS_RETENCION`; si no lo trae
+(9 campos, marca `X`) es el de Cordoba, `LUA_PERCEPCION` o `LUA_RETENCION`. La politica por
+defecto usa esos nombres, asi que el listado de Cordoba subido como `ARBA` se rechaza con
+`LAYOUT_MISMATCH`, igual que el unificado de AGIP.
+
+Si igual quedo cargado un archivo bajo el tipo equivocado (por ejemplo antes de esta
+validacion), la forma de detectarlo es comparar periodos:
+
+```bash
+node tests/check-duplicados.js ARBA 2026-09-01 2026-09-30
+node tests/check-duplicados.js IIBB_CORDOBA 2026-09-01 2026-09-30
+```
+
+Muestra el historial de cargas con el nombre de cada archivo y las filas por regimen del
+periodo. Si un periodo de un tipo tiene exactamente las mismas filas que el mismo periodo de
+otro tipo (por ejemplo `ARBA`/`P` con 832.379, igual que `IIBB_CORDOBA`/`P`), es el mismo
+archivo cargado dos veces bajo tipos distintos. Para sacarlo sin tocar el resto del tipo:
+
+```bash
+node tests/borrar-periodo.js ARBA P 2026-09-01 2026-09-30        # solo cuenta
+node tests/borrar-periodo.js ARBA P 2026-09-01 2026-09-30 --si   # borra por lotes
+```
+
+---
+
 ## Formato del archivo de padron
 
 Archivos de texto plano separados por punto y coma (`;`). El formato se **detecta solo**
@@ -728,11 +800,13 @@ a partir del primer campo de la primera linea util, no hace falta declararlo al 
 
 | Primer campo | Layout | Regimen |
 |--------------|--------|---------|
-| 8 digitos (DDMMYYYY) | `UNIFICADO` (11/12 campos, el que publican ARBA y AGIP) | `AMBOS` |
-| `P` | `PERCEPCION` | `P` |
-| `R` | `RETENCION` | `R` |
+| 8 digitos (DDMMYYYY) | `UNIFICADO` (11/12 campos, el de AGIP; ARBA tambien publica uno) | `AMBOS` |
+| `P` | `RGS_PERCEPCION` si trae grupo en el campo 10 (ARBA), `LUA_PERCEPCION` si no (Cordoba) | `P` |
+| `R` | `RGS_RETENCION` si trae grupo en el campo 10 (ARBA), `LUA_RETENCION` si no (Cordoba) | `R` |
 
-Si la primera linea no coincide con ninguno de los tres, se asume que es un header y se saltea.
+Si la primera linea no coincide con ninguno, se asume que es un header y se saltea. `PERCEPCION`
+y `RETENCION` a secas nombran la familia: sirven en `PADRON_LAYOUTS` como comodin de sus dos
+variantes.
 
 ### Layout `UNIFICADO` (11 campos, sin prefijo)
 
@@ -759,23 +833,27 @@ lo publica con la denominacion cargada y ambos grupos en `00`.
 | grupoPercepcion | Codigo grupo de percepcion | 25 |
 | grupoRetencion | Codigo grupo de retencion | 24 |
 
-### Layout `PERCEPCION` (prefijo `P`)
+### Layout `PERCEPCION` (prefijo `P`): variantes `RGS_PERCEPCION` y `LUA_PERCEPCION`
 
 ```
-P;fechaPublicacion;fechaDesde;fechaHasta;cuit;tipoContribuyente;marcaAlta;marcaBaja;alicuotaPercepcion
-P;22062026;01072026;31072026;20001220986;L;X;N;04,00
+P;fechaPublicacion;fechaDesde;fechaHasta;cuit;tipoContribuyente;marcaAlta;marcaBaja;alicuotaPercepcion[;grupoPercepcion;]
+P;27082026;01092026;30092026;20000282465;C;S;N;1,50;07;      (RGS, ARBA)
+P;22062026;01072026;31072026;20001220986;L;X;N;04,00          (LUA, Cordoba)
 ```
 
-9 campos. No trae codigos de grupo ni alicuota de retencion: se guardan en `null` y `0`.
+9 campos minimo. El grupo de percepcion (campo 10) solo viene en el diseño de ARBA; en el de
+Cordoba queda `null`. No trae alicuota de retencion: se guarda `0`.
 
-### Layout `RETENCION` (prefijo `R`)
+### Layout `RETENCION` (prefijo `R`): variantes `RGS_RETENCION` y `LUA_RETENCION`
 
 ```
-R;fechaPublicacion;fechaDesde;fechaHasta;cuit;tipoContribuyente;marcaAlta;marcaBaja;alicuotaRetencion;grupoRetencion
-R;25062026;01072026;31072026;20000282465;D;N;N;3,00;21;
+R;fechaPublicacion;fechaDesde;fechaHasta;cuit;tipoContribuyente;marcaAlta;marcaBaja;alicuotaRetencion[;grupoRetencion;]
+R;25062026;01072026;31072026;20000282465;D;N;N;3,00;21;       (RGS, ARBA)
+R;22062026;01072026;31072026;20000780333;L;X;N;02,50          (LUA, Cordoba)
 ```
 
-10 campos minimo. No trae alicuota ni grupo de percepcion.
+9 campos minimo. El grupo de retencion (campo 10) solo viene en el diseño de ARBA; en el de
+Cordoba queda `null`. No trae alicuota ni grupo de percepcion.
 
 ### Convivencia de percepcion y retencion
 
@@ -794,24 +872,26 @@ regimen. Hay que mirar el campo `regimen` para saber cual usar.
 ### Que layout admite cada tipo de padron
 
 El archivo no trae ningun campo que identifique la jurisdiccion, y los mismos CUITs
-aparecen en ARBA y en AGIP, asi que no hay forma de detectarla por contenido. Lo unico
-que se puede chequear es el layout. Por eso cada `padronType` declara que layouts
-admite, y un upload o reload cuyo layout no coincide se rechaza con `400 LAYOUT_MISMATCH`
-**antes** de borrar o insertar nada, incluso con `?replace=true`.
+aparecen en ARBA y en AGIP, asi que lo unico que se puede chequear es el layout. Cada
+`padronType` declara que layouts admite, y un upload o reload cuyo layout no coincide se
+rechaza con `400 LAYOUT_MISMATCH` **antes** de borrar o insertar nada, incluso con
+`?replace=true`. El panel muestra esta tabla en la tarjeta **Formatos admitidos por tipo** y
+debajo del selector al subir; `GET /api/v1/padron-info` la devuelve en `layoutsAdmitidos`.
 
-ARBA se carga con sus padrones de regimenes generales, que vienen con prefijo `P` (percepcion)
-y `R` (retencion, por ejemplo `PadronRGSRet092026.TXT`). AGIP publica el unificado de 12 campos
-(`ARDJU008MMYYYY.TXT`). Como los layouts difieren, la politica frena el archivo de AGIP subido
-como `ARBA` (el error mas comun: el panel arranca con `ARBA` seleccionado) y el de ARBA subido
-como `AGIP`. Lo que no puede distinguir es un `P`/`R` de ARBA de uno de otra jurisdiccion, por
-ejemplo el de Cordoba. El unificado de ARBA (`PADRON_UNIFICADO_ARBA.txt`) queda rechazado con
-este default; si hiciera falta cargarlo, sumar `UNIFICADO` a la entrada de `ARBA`.
+Alcanza porque los tres organismos publican diseños distintos: ARBA sus padrones de regimenes
+generales (`RGS_PERCEPCION`, `RGS_RETENCION`: prefijo `P`/`R` con grupo), AGIP el unificado de 12
+campos (`UNIFICADO`) y Cordoba su listado unico de alicuotas (`LUA_PERCEPCION`,
+`LUA_RETENCION`: prefijo `P`/`R` sin grupo). Con el default, el archivo de AGIP o el de Cordoba
+subidos como `ARBA` (el error mas comun: el panel arranca con `ARBA` seleccionado) se rechazan,
+igual que el de ARBA subido como `AGIP` o como `IIBB_CORDOBA`. El unificado de ARBA
+(`PADRON_UNIFICADO_ARBA.txt`) tambien queda rechazado; si hiciera falta cargarlo, sumar
+`UNIFICADO` a la entrada de `ARBA`.
 
 Se configura en `.env`:
 
 ```
 # TIPO:LAYOUT[,LAYOUT]|TIPO:LAYOUT
-PADRON_LAYOUTS=ARBA:PERCEPCION,RETENCION|AGIP:UNIFICADO
+PADRON_LAYOUTS=ARBA:RGS_PERCEPCION,RGS_RETENCION|AGIP:UNIFICADO|IIBB_CORDOBA:LUA_PERCEPCION,LUA_RETENCION
 ```
 
 Ese es el valor por defecto si la variable no existe. Reglas:
@@ -819,7 +899,10 @@ Ese es el valor por defecto si la variable no existe. Reglas:
 - Un tipo **sin entrada** (por ejemplo `IIBB_SANTA_FE`) acepta cualquier layout y deja un
   warning en el log. Cuando aparezca el primer archivo real de esa jurisdiccion, agregar
   su layout al parser si es un formato nuevo y sumar la entrada a `PADRON_LAYOUTS`.
-- Los layouts posibles son los que conoce el parser: `UNIFICADO`, `PERCEPCION`, `RETENCION`.
+- Los layouts posibles son `UNIFICADO`, `RGS_PERCEPCION`, `RGS_RETENCION`, `LUA_PERCEPCION` y
+  `LUA_RETENCION`, mas los comodines de familia `PERCEPCION` y `RETENCION`, que admiten las dos
+  variantes. `ARBA:PERCEPCION,RETENCION` (la politica anterior al 18/09/2026) sigue siendo valida,
+  pero deja pasar el listado de Cordoba bajo `ARBA`.
 - Si la variable menciona un tipo que no esta en `ALLOWED_PADRON_TYPES` o un layout
   inexistente, el servidor **no levanta** y el log dice cual es el problema.
 - `PADRON_LAYOUTS=` (vacio explicito) desactiva la politica por completo.
